@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+
+# System
+__MACOSX/
+.DS_Store
+Thumbs.db
+
+# PyInstaller
+build/
+dist/
+*.spec
+# Keep AutoPackage.spec if it is the main config, but usually specs are generated. 
+# User has AutoPackage.spec in root. We'll keep root spec, ignore others if any.
+
+# Temporary Files
+temp_uploads/*
+!temp_uploads/.gitkeep
+temp_outputs/*
+!temp_outputs/.gitkeep
+*.log
+AutoPackage.zip
+
+# Generated Excel files in root (if any remain)
+Converted_*.xlsx
+DeliveryNote_*.xlsx
+
+# Test outputs
+test_output.xls
+test_output.xlsx
+AutoPackage/test_output.xls
+AutoPackage/test_output.xlsx

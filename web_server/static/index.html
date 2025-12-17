@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoPackage V2 - 配分表转换工具</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- JSZip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(226, 232, 240, 0.8); }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // --- Components mimicking shadcn/ui ---
+        
+        const Button = ({ children, onClick, disabled, className, variant = 'primary' }) => {
+            const baseClass = "px-4 py-2 rounded-md font-medium transition-all duration-200 flex items-center justify-center gap-2";
+            const variants = {
+                primary: "bg-black text-white hover:bg-gray-800 disabled:bg-gray-400",
+                outline: "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                ghost: "text-gray-600 hover:bg-gray-100"
+            };
+            return (
+                <button 
+                    onClick={onClick} 
+                    disabled={disabled} 
+                    className={`${baseClass} ${variants[variant]} ${className || ''}`}
+                >
+                    {children}
+                </button>
+            );
+        };
+
+        const Card = ({ children, className }) => (
+            <div className={`glass-panel rounded-xl shadow-sm p-6 ${className || ''}`}>{children}</div>
+        );
+
+        const Badge = ({ children, type = 'default' }) => {
+            const styles = {
+                default: "bg-gray-100 text-gray-800",
+                success: "bg-green-100 text-green-800",
+                processing: "bg-blue-100 text-blue-800 animate-pulse"
+            };
+            return <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${styles[type]}`}>{children}</span>;
+        };
+
+        const FileList = ({ files, onRemove }) => {
+            if (!files || files.length === 0) return null;
+            
+            return (
+                <div className="mt-6 space-y-3">
+                    <h4 className="text-sm font-medium text-gray-700 flex items-center justify-between">
+                        <span>待处理文件 ({files.length})</span>
+                        <span className="text-xs text-gray-500">
+                            {files.filter(f => f.status === 'success').length} 完成 / 
+                            {files.filter(f => f.status === 'processing').length} 处理中
+                        </span>
+                    </h4>
+                    <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
+                        {files.map((item, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg shadow-sm">
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                        item.status === 'success' ? 'bg-green-100 text-green-600' :
+                                        item.status === 'error' ? 'bg-red-100 text-red-600' :
+                                        item.status === 'processing' ? 'bg-blue-100 text-blue-600' :
+                                        'bg-gray-100 text-gray-500'
+                                    }`}>
+                                        {item.status === 'success' ? <i data-lucide="check" className="w-4 h-4"></i> :
+                                         item.status === 'error' ? <i data-lucide="alert-triangle" className="w-4 h-4"></i> :
+                                         item.status === 'processing' ? <i data-lucide="loader-2" className="w-4 h-4 animate-spin"></i> :
+                                         <i data-lucide="file" className="w-4 h-4"></i>}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-gray-700 truncate" title={item.file.name}>{item.file.name}</p>
+                                        <p className="text-xs text-gray-500">
+                                            {item.status === 'success' ? '转换成功' :
+                                             item.status === 'error' ? '处理失败' :
+                                             item.status === 'processing' ? '正在处理...' :
+                                             '等待中'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {item.status === 'success' && item.result && (
+                                        <a href={item.result.download_url} download className="no-underline">
+                                            <Button className="h-8 px-3 text-xs bg-green-50 text-green-700 hover:bg-green-100 hover:text-green-800 border-green-200">
+                                                <i data-lucide="download" className="w-3 h-3"></i>
+                                                下载
+                                            </Button>
+                                        </a>
+                                    )}
+                                    {item.status === 'idle' && (
+                                        <button onClick={(e) => { e.stopPropagation(); onRemove(index); }} className="text-gray-400 hover:text-red-500 transition-colors p-1">
+                                            <i data-lucide="trash-2" className="w-4 h-4"></i>
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- TemplateManager Component ---
+
+        const TemplateManager = () => {
+            const [templates, setTemplates] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const fetchTemplates = async () => {
+                setIsLoading(true);
+                try {
+                    const res = await fetch('/api/templates');
+                    const data = await res.json();
+                    setTemplates(data.templates || []);
+                } catch (e) {
+                    console.error("Failed to fetch templates", e);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                fetchTemplates();
+            }, []);
+
+            const handleUpload = async (e) => {
+                if (!e.target.files || !e.target.files[0]) return;
+                const file = e.target.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const res = await fetch('/api/templates', { method: 'POST', body: formData });
+                    if (res.ok) {
+                        fetchTemplates();
+                        // Reset input
+                        e.target.value = null;
+                    } else {
+                        const err = await res.json();
+                        alert("上传失败: " + (err.detail || "Unknown error"));
+                    }
+                } catch (e) {
+                    alert("上传错误: " + e.message);
+                }
+            };
+
+            const handleDelete = async (filename) => {
+                if (!confirm(`确定要删除模板 ${filename} 吗?`)) return;
+                try {
+                    const res = await fetch(`/api/templates/${filename}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        fetchTemplates();
+                    } else {
+                        alert("删除失败");
+                    }
+                } catch (e) {
+                    alert("删除错误: " + e.message);
+                }
+            };
+
+            return (
+                <div className="flex-1 p-8 overflow-y-auto">
+                    <header className="mb-8 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-900">模板管理</h2>
+                            <p className="text-gray-500">管理用于转换的 Excel 模板文件</p>
+                        </div>
+                        <Button onClick={() => fileInputRef.current.click()}>
+                            <i data-lucide="upload" className="w-4 h-4"></i>
+                            上传新模板
+                        </Button>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            className="hidden" 
+                            accept=".xls,.xlsx" 
+                            onChange={handleUpload}
+                        />
+                    </header>
+
+                    <Card>
+                        {isLoading ? (
+                            <div className="text-center py-8 text-gray-500">加载中...</div>
+                        ) : templates.length === 0 ? (
+                            <div className="text-center py-12 text-gray-500">
+                                <i data-lucide="file-spreadsheet" className="w-12 h-12 mx-auto mb-3 opacity-20"></i>
+                                <p>暂无模板文件</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left text-gray-500">
+                                    <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-3">文件名</th>
+                                            <th className="px-6 py-3">大小</th>
+                                            <th className="px-6 py-3">修改时间</th>
+                                            <th className="px-6 py-3 text-right">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {templates.map((tpl) => (
+                                            <tr key={tpl.name} className="bg-white border-b hover:bg-gray-50">
+                                                <td className="px-6 py-4 font-medium text-gray-900 flex items-center gap-2">
+                                                    <i data-lucide="file-spreadsheet" className="w-4 h-4 text-green-600"></i>
+                                                    {tpl.name}
+                                                </td>
+                                                <td className="px-6 py-4">{(tpl.size / 1024).toFixed(1)} KB</td>
+                                                <td className="px-6 py-4">{tpl.modified}</td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <button 
+                                                        onClick={() => handleDelete(tpl.name)}
+                                                        className="text-red-600 hover:text-red-900 font-medium flex items-center gap-1 ml-auto"
+                                                    >
+                                                        <i data-lucide="trash-2" className="w-4 h-4"></i>
+                                                        删除
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </Card>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+
+        const App = () => {
+            const [view, setView] = useState('dashboard'); // 'dashboard', 'templates'
+            const [mode, setMode] = useState('allocation'); // 'allocation' or 'delivery_note'
+            const [fileList, setFileList] = useState([]); // Array of { file, status, result, error }
+            const [templateFile, setTemplateFile] = useState(null);
+            const [libraryTemplates, setLibraryTemplates] = useState([]);
+            const [selectedLibTemplate, setSelectedLibTemplate] = useState(""); 
+            const [isDragging, setIsDragging] = useState(false);
+            const [globalStatus, setGlobalStatus] = useState('idle'); // idle, processing, done
+            const [logs, setLogs] = useState([]);
+            const fileInputRef = useRef(null);
+            const templateInputRef = useRef(null);
+
+            // Fetch library templates
+            useEffect(() => {
+                fetch('/api/templates')
+                    .then(res => res.json())
+                    .then(data => setLibraryTemplates(data.templates || []))
+                    .catch(console.error);
+            }, [view]); // Refresh when view changes (e.g. coming back from manager)
+
+            // Reset state when mode changes
+            useEffect(() => {
+                setFileList([]);
+                setTemplateFile(null);
+                setSelectedLibTemplate("");
+                setGlobalStatus('idle');
+                setLogs([]);
+            }, [mode]);
+
+            const addLog = (msg) => {
+                const time = new Date().toLocaleTimeString();
+                setLogs(prev => [...prev, `[${time}] ${msg}`]);
+            };
+
+            const handleFileChange = (e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                    const newFiles = Array.from(e.target.files).map(f => ({
+                        file: f,
+                        status: 'idle',
+                        result: null,
+                        error: null
+                    }));
+                    setFileList(prev => [...prev, ...newFiles]);
+                    addLog(`添加了 ${newFiles.length} 个文件`);
+                }
+            };
+            
+            const handleRemoveFile = (index) => {
+                setFileList(prev => prev.filter((_, i) => i !== index));
+            };
+
+            const handleTemplateChange = (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    setTemplateFile(e.target.files[0]);
+                    setSelectedLibTemplate(""); // Clear library selection
+                    addLog(`自定义模板已选择: ${e.target.files[0].name}`);
+                }
+            };
+
+            const handleLibTemplateSelect = (e) => {
+                const val = e.target.value;
+                setSelectedLibTemplate(val);
+                if (val) {
+                    setTemplateFile(null); // Clear custom file
+                    // Clear file input value
+                    if (templateInputRef.current) templateInputRef.current.value = "";
+                    addLog(`选择了库模板: ${val}`);
+                }
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    const newFiles = Array.from(e.dataTransfer.files).map(f => ({
+                        file: f,
+                        status: 'idle',
+                        result: null,
+                        error: null
+                    }));
+                    setFileList(prev => [...prev, ...newFiles]);
+                    addLog(`拖入了 ${newFiles.length} 个文件`);
+                }
+            };
+
+            const processFile = async (item, index) => {
+                // Update status to processing
+                setFileList(prev => {
+                    const next = [...prev];
+                    next[index] = { ...next[index], status: 'processing' };
+                    return next;
+                });
+                
+                addLog(`[${item.file.name}] 开始处理...`);
+
+                const formData = new FormData();
+                formData.append('file', item.file);
+                formData.append('mode', mode); // Add mode to request
+                
+                if (templateFile) {
+                    formData.append('template', templateFile);
+                } else if (selectedLibTemplate) {
+                    formData.append('template_name', selectedLibTemplate);
+                }
+
+                try {
+                    const response = await fetch('/api/convert', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok && data.status === 'success') {
+                        addLog(`[${item.file.name}] 处理成功`);
+                        setFileList(prev => {
+                            const next = [...prev];
+                            next[index] = { ...next[index], status: 'success', result: data };
+                            return next;
+                        });
+                    } else {
+                        throw new Error(data.message || "Unknown error");
+                    }
+                } catch (error) {
+                    addLog(`[${item.file.name}] 错误: ${error.message}`);
+                    setFileList(prev => {
+                        const next = [...prev];
+                        next[index] = { ...next[index], status: 'error', error: error.message };
+                        return next;
+                    });
+                }
+            };
+
+            const handleConvertAll = async () => {
+                if (fileList.length === 0) return;
+
+                setGlobalStatus('processing');
+                setLogs([]); 
+                addLog("开始批量处理任务...");
+                
+                // Process sequentially to avoid overwhelming server or just for clarity
+                // Could also use Promise.all for parallel
+                for (let i = 0; i < fileList.length; i++) {
+                    if (fileList[i].status !== 'success') {
+                        await processFile(fileList[i], i);
+                    }
+                }
+                
+                setGlobalStatus('done');
+                addLog("所有任务处理完成");
+            };
+
+            const handleBatchDownload = async () => {
+                const successFiles = fileList.filter(f => f.status === 'success' && f.result);
+                if (successFiles.length === 0) return;
+
+                addLog(`正在打包 ${successFiles.length} 个文件...`);
+                const zip = new JSZip();
+                
+                // Fetch all files
+                for (const item of successFiles) {
+                    try {
+                        const response = await fetch(item.result.download_url);
+                        const blob = await response.blob();
+                        // Use the generated filename from backend
+                        const filename = item.result.stats.generated_file;
+                        zip.file(filename, blob);
+                    } catch (e) {
+                        addLog(`打包失败 [${item.file.name}]: ${e.message}`);
+                    }
+                }
+
+                // Generate and save zip
+                try {
+                    const content = await zip.generateAsync({type: "blob"});
+                    const url = window.URL.createObjectURL(content);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    const timestamp = new Date().toISOString().slice(0,19).replace(/[-:]/g, "");
+                    link.download = `Batch_Converted_${timestamp}.zip`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    addLog("打包下载已开始");
+                } catch (e) {
+                    addLog(`生成压缩包失败: ${e.message}`);
+                }
+            };
+
+            useEffect(() => {
+                lucide.createIcons();
+            }, [globalStatus, fileList]);
+
+            return (
+                <div className="min-h-screen flex">
+                    {/* Sidebar */}
+                    <div className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col">
+                        <div className="p-6 border-b border-gray-100">
+                            <h1 className="text-xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+                                <i data-lucide="package" className="w-6 h-6 text-blue-600"></i>
+                                AutoPackage
+                            </h1>
+                            <p className="text-xs text-gray-400 mt-1">V2.0 Web Edition</p>
+                        </div>
+                        <nav className="flex-1 p-4 space-y-1">
+                            <button 
+                                onClick={() => { setView('dashboard'); setMode('allocation'); }}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    view === 'dashboard' && mode === 'allocation' 
+                                    ? "bg-gray-100 text-gray-900" 
+                                    : "text-gray-600 hover:bg-gray-50"
+                                }`}
+                            >
+                                <i data-lucide="layout-dashboard" className="w-4 h-4"></i>
+                                转换工作台
+                            </button>
+                            <button 
+                                onClick={() => { setView('dashboard'); setMode('delivery_note'); }}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    view === 'dashboard' && mode === 'delivery_note' 
+                                    ? "bg-gray-100 text-gray-900" 
+                                    : "text-gray-600 hover:bg-gray-50"
+                                }`}
+                            >
+                                <i data-lucide="clipboard-list" className="w-4 h-4"></i>
+                                受渡伝票作成
+                            </button>
+                            <button 
+                                onClick={() => setView('templates')} 
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                                    view === 'templates' 
+                                    ? "bg-gray-100 text-gray-900" 
+                                    : "text-gray-600 hover:bg-gray-50"
+                                }`}
+                            >
+                                <i data-lucide="file-spreadsheet" className="w-4 h-4"></i>
+                                模板管理
+                            </button>
+                        </nav>
+                        <div className="p-4 border-t border-gray-100">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
+                                    AD
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-gray-700">Admin User</p>
+                                    <p className="text-xs text-gray-500">Logistics Dept.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    {view === 'templates' ? (
+                        <TemplateManager />
+                    ) : (
+                        <div className="flex-1 p-8 overflow-y-auto">
+                        <header className="mb-8 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900">
+                                    {mode === 'allocation' ? '配分表转换' : '受渡伝票作成'}
+                                </h2>
+                                <p className="text-gray-500">
+                                    {mode === 'allocation' 
+                                        ? '上传 Excel 配分表，自动转换为标准模板格式。' 
+                                        : '上传填写了实际箱号的配分表，自动生成受渡伝票。'}
+                                </p>
+                            </div>
+                            <Button variant="outline">
+                                <i data-lucide="help-circle" className="w-4 h-4"></i>
+                                帮助文档
+                            </Button>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            {/* Left Column: Input */}
+                            <div className="lg:col-span-2 space-y-6">
+                                <Card className="border-2 border-dashed border-gray-300 hover:border-blue-400 transition-colors">
+                                    <div 
+                                        className={`flex flex-col items-center justify-center py-12 cursor-pointer ${isDragging ? 'bg-blue-50' : ''}`}
+                                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                                        onDragLeave={() => setIsDragging(false)}
+                                        onDrop={handleDrop}
+                                        onClick={() => fileInputRef.current.click()}
+                                    >
+                                        <input 
+                                            type="file" 
+                                            ref={fileInputRef} 
+                                            className="hidden" 
+                                            accept=".xls,.xlsx" 
+                                            multiple
+                                            onChange={handleFileChange}
+                                        />
+                                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                                            <i data-lucide="upload-cloud" className="w-8 h-8 text-blue-600"></i>
+                                        </div>
+                                        <h3 className="text-lg font-medium text-gray-900">
+                                            点击上传或拖拽文件到此处
+                                        </h3>
+                                        <p className="text-gray-500 mt-2 text-sm">支持批量上传 .xls, .xlsx 格式</p>
+                                    </div>
+                                    
+                                    <FileList files={fileList} onRemove={handleRemoveFile} />
+                                    
+                                    {/* Template Upload Section */}
+                                    <div className="mt-4 border-t pt-4">
+                                        <div className="flex flex-col gap-3">
+                                            <div className="flex items-center gap-2">
+                                                <i data-lucide="file-spreadsheet" className="w-4 h-4 text-gray-500"></i>
+                                                <span className="text-sm font-medium text-gray-700">
+                                                    模板选择
+                                                </span>
+                                            </div>
+                                            
+                                            <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-lg">
+                                                <div className="flex-1">
+                                                    <select 
+                                                        className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5"
+                                                        value={selectedLibTemplate}
+                                                        onChange={handleLibTemplateSelect}
+                                                    >
+                                                        <option value="">使用系统默认模板</option>
+                                                        {libraryTemplates.length > 0 && (
+                                                            <optgroup label="库模板">
+                                                                {libraryTemplates.map(t => (
+                                                                    <option key={t.name} value={t.name}>{t.name}</option>
+                                                                ))}
+                                                            </optgroup>
+                                                        )}
+                                                    </select>
+                                                </div>
+                                                <span className="text-xs text-gray-400">或</span>
+                                                <input 
+                                                    type="file" 
+                                                    ref={templateInputRef} 
+                                                    className="hidden" 
+                                                    accept=".xls,.xlsx" 
+                                                    onChange={handleTemplateChange}
+                                                />
+                                                <div className="flex items-center gap-2">
+                                                    {templateFile ? (
+                                                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-100 flex items-center gap-1 max-w-[150px] truncate">
+                                                            {templateFile.name}
+                                                            <button onClick={(e) => { e.stopPropagation(); setTemplateFile(null); }} className="hover:text-blue-900">
+                                                                <i data-lucide="x" className="w-3 h-3"></i>
+                                                            </button>
+                                                        </span>
+                                                    ) : (
+                                                        <Button variant="outline" className="text-xs py-1 h-8 bg-white" onClick={() => templateInputRef.current.click()}>
+                                                            上传自定义
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {fileList.length > 0 && (
+                                        <div className="mt-6 flex justify-end gap-3">
+                                            <Button 
+                                                variant="outline"
+                                                onClick={(e) => { e.stopPropagation(); setFileList([]); setGlobalStatus('idle'); }}
+                                                disabled={globalStatus === 'processing'}
+                                            >
+                                                清空列表
+                                            </Button>
+                                            <Button 
+                                                onClick={(e) => { e.stopPropagation(); handleConvertAll(); }}
+                                                disabled={globalStatus === 'processing'}
+                                                className="w-full sm:w-auto"
+                                            >
+                                                {globalStatus === 'processing' ? (
+                                                    <>
+                                                        <i data-lucide="loader-2" className="w-4 h-4 animate-spin"></i>
+                                                        批量处理中...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <i data-lucide="zap" className="w-4 h-4"></i>
+                                                        开始批量转换
+                                                    </>
+                                                )}
+                                            </Button>
+                                        </div>
+                                    )}
+                                </Card>
+
+                                {globalStatus === 'done' && (
+                                    <div className="animate-fade-in">
+                                        <Card className="bg-green-50 border-green-200">
+                                            <div className="flex items-start gap-4">
+                                                <div className="p-2 bg-green-100 rounded-lg">
+                                                    <i data-lucide="check-circle" className="w-6 h-6 text-green-600"></i>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h3 className="text-lg font-medium text-green-900">批量转换完成！</h3>
+                                                    <p className="text-green-700 mt-1">
+                                                        成功: {fileList.filter(f => f.status === 'success').length}, 
+                                                        失败: {fileList.filter(f => f.status === 'error').length}
+                                                    </p>
+                                                    <div className="mt-4 flex gap-3">
+                                                        {fileList.some(f => f.status === 'success') && (
+                                                            <Button 
+                                                                className="bg-green-600 hover:bg-green-700 text-white border-transparent"
+                                                                onClick={handleBatchDownload}
+                                                            >
+                                                                <i data-lucide="archive" className="w-4 h-4"></i>
+                                                                打包下载所有结果
+                                                            </Button>
+                                                        )}
+                                                        <Button variant="outline" onClick={() => { setFileList([]); setGlobalStatus('idle'); setLogs([]); }}>
+                                                            开始新任务
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </Card>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Right Column: Status & Logs */}
+                            <div className="space-y-6">
+                                <Card className="h-full flex flex-col">
+                                    <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                        <i data-lucide="activity" className="w-4 h-4 text-gray-500"></i>
+                                        处理进度
+                                    </h3>
+                                    <div className="bg-slate-50 rounded-lg p-4 flex-1 min-h-[400px] overflow-y-auto border border-slate-100 shadow-inner">
+                                        {logs.length === 0 && (
+                                            <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                                <i data-lucide="terminal" className="w-8 h-8 mb-2 opacity-50"></i>
+                                                <p className="text-sm">等待任务开始...</p>
+                                            </div>
+                                        )}
+                                        <div className="space-y-3">
+                                            {logs.map((log, index) => {
+                                                // 简单的日志类型判断
+                                                const isError = log.includes("错误") || log.includes("Error") || log.includes("failed");
+                                                const isSuccess = log.includes("成功") || log.includes("Success");
+                                                
+                                                // 提取时间戳 [HH:MM:SS]
+                                                const timeMatch = log.match(/^\[(.*?)\]/);
+                                                const time = timeMatch ? timeMatch[1] : "";
+                                                const content = log.replace(/^\[.*?\]\s*/, "");
+
+                                                return (
+                                                    <div key={index} className="flex gap-3 animate-fade-in group">
+                                                        <div className="flex-shrink-0 mt-1.5">
+                                                            <div className={`w-2 h-2 rounded-full ${
+                                                                isError ? "bg-red-500 shadow-red-200 shadow-md" : 
+                                                                isSuccess ? "bg-green-500 shadow-green-200 shadow-md" : 
+                                                                "bg-blue-400"
+                                                            }`}></div>
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <p className={`text-sm ${
+                                                                isError ? "text-red-600 font-medium" : 
+                                                                isSuccess ? "text-green-700 font-medium" : 
+                                                                "text-slate-600"
+                                                            }`}>
+                                                                {content}
+                                                            </p>
+                                                            {time && <p className="text-[10px] text-slate-400 mt-0.5 group-hover:text-slate-500 transition-colors">{time}</p>}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </Card>
+                            </div>
+                        </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
