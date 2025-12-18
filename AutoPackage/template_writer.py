@@ -91,28 +91,82 @@ class TemplateWriter:
             # 获取模板行样式
             template_row = TemplateConfig.PRODUCT_LIST_DATA_START + 1
             
+            # 统计总出荷数
+            grand_total_ship_qty = 0
+            
+            # 确定列范围（从No列到增产数列）
+            # 注意：这里的列索引是0-indexed，所以需要+1
+            start_col = TemplateConfig.PRODUCT_LIST_COL_NO
+            end_col = getattr(TemplateConfig, 'PRODUCT_LIST_COL_INCREASE', 8) # 默认为8
+            
+            last_row_num = 0
+            
             for idx, sku in enumerate(skus):
                 row_num = TemplateConfig.PRODUCT_LIST_DATA_START + 1 + idx
+                last_row_num = row_num
                 
-                # No.
-                cell = sheet.cell(row=row_num, column=TemplateConfig.PRODUCT_LIST_COL_NO + 1)
-                cell.value = idx + 1
-                self._copy_cell_style(sheet, template_row, TemplateConfig.PRODUCT_LIST_COL_NO + 1, cell)
+                # 遍历所有列，确保边框完整
+                for col_idx in range(start_col, end_col + 1):
+                    cell = sheet.cell(row=row_num, column=col_idx + 1)
+                    
+                    # 根据列索引写入数据
+                    val = None
+                    if col_idx == TemplateConfig.PRODUCT_LIST_COL_NO:
+                        val = idx + 1
+                    elif col_idx == TemplateConfig.PRODUCT_LIST_COL_CODE:
+                        val = str(sku['product_code'])
+                    elif col_idx == TemplateConfig.PRODUCT_LIST_COL_COLOR:
+                        val = str(sku['color'])
+                    elif col_idx == TemplateConfig.PRODUCT_LIST_COL_SIZE:
+                        val = str(sku['size'])
+                    elif col_idx == TemplateConfig.PRODUCT_LIST_COL_JAN:
+                        val = str(sku.get('jan_code', ''))
+                    elif col_idx == getattr(TemplateConfig, 'PRODUCT_LIST_COL_SHIP_QTY', 6):
+                        qty = sku.get('total_qty', 0)
+                        if qty:
+                            val = int(qty)
+                            grand_total_ship_qty += val
+                    
+                    if val is not None:
+                        cell.value = val
+                    
+                    # 复制样式（所有列都应用样式，从而确保边框）
+                    self._copy_cell_style(sheet, template_row, col_idx + 1, cell)
+            
+            # 写入合计行
+            total_row_num = last_row_num + 1
+            
+            # 定义合计行样式（灰色背景，加粗，边框）
+            total_style = {
+                'font': Font(name='ＭＳ Ｐゴシック', size=10, bold=True), # 稍微大一点
+                'alignment': Alignment(horizontal='center', vertical='center'),
+                'fill': PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid'),
+                'border': Border(
+                    left=Side(style='thin'),
+                    right=Side(style='thin'),
+                    top=Side(style='thin'),
+                    bottom=Side(style='thin')
+                )
+            }
+            
+            # 合计行从No列到增产数列
+            for col_idx in range(start_col, end_col + 1):
+                cell = sheet.cell(row=total_row_num, column=col_idx + 1)
                 
-                # 商品コード
-                cell = sheet.cell(row=row_num, column=TemplateConfig.PRODUCT_LIST_COL_CODE + 1)
-                cell.value = str(sku['product_code'])
-                self._copy_cell_style(sheet, template_row, TemplateConfig.PRODUCT_LIST_COL_CODE + 1, cell)
+                # JAN列写"合計"
+                if col_idx == TemplateConfig.PRODUCT_LIST_COL_JAN:
+                    cell.value = "合計"
+                # 出荷数列写总数
+                elif col_idx == getattr(TemplateConfig, 'PRODUCT_LIST_COL_SHIP_QTY', 6):
+                    cell.value = grand_total_ship_qty
+                else:
+                    cell.value = "" # 其他列留空，但应用样式
                 
-                # カラー
-                cell = sheet.cell(row=row_num, column=TemplateConfig.PRODUCT_LIST_COL_COLOR + 1)
-                cell.value = str(sku['color'])
-                self._copy_cell_style(sheet, template_row, TemplateConfig.PRODUCT_LIST_COL_COLOR + 1, cell)
-                
-                # サイズ
-                cell = sheet.cell(row=row_num, column=TemplateConfig.PRODUCT_LIST_COL_SIZE + 1)
-                cell.value = str(sku['size'])
-                self._copy_cell_style(sheet, template_row, TemplateConfig.PRODUCT_LIST_COL_SIZE + 1, cell)
+                # 应用样式
+                cell.font = total_style['font']
+                cell.alignment = total_style['alignment']
+                cell.fill = total_style['fill']
+                cell.border = total_style['border']
                 
         except Exception as e:
             print(f"警告: 更新商品一覧页失败: {e}")
@@ -212,17 +266,18 @@ class TemplateWriter:
         sheet['E1'].alignment = Alignment(horizontal='center', vertical='center')
         
         # 行1: No.标签 (F1)
-        sheet['F1'].value = "No."
+        sheet['F1'].value = "Jan"
         sheet['F1'].font = common_font
         
         # 行1: SKU序号 (从I列开始)
-        for idx in range(len(skus)):
+        for idx, sku in enumerate(skus):
             col_letter = get_column_letter(TemplateConfig.PT_SKU_START_COL + 1 + idx)
             cell = sheet[f'{col_letter}1']
-            cell.value = idx + 1
+            cell.value = str(sku.get('jan_code', ''))
             # 应用样式
             cell.font = header_sku_style['font']
-            cell.alignment = header_sku_style['alignment']
+            # JANCODE 需要换行
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             cell.fill = header_sku_style['fill']
             cell.border = header_sku_style['border']
         

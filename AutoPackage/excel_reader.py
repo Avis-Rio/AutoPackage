@@ -5,8 +5,78 @@ Excel读取模块 - 读取配分表数据
 """
 import xlrd
 import openpyxl
-from config import AllocationTableConfig
+from config import AllocationTableConfig, DetailTableConfig
 from typing import Dict, List, Tuple
+import pandas as pd
+
+
+class DetailTableReader:
+    """明细表读取器"""
+    
+    @staticmethod
+    def read_jan_map(file_path: str) -> Dict[Tuple[str, str, str], str]:
+        """
+        读取明细表并返回 JANCODE 映射字典
+        
+        Args:
+            file_path: 明细表文件路径
+            
+        Returns:
+            Dict: {(品番, カラー, サイズ): JANCODE}
+        """
+        try:
+            # 读取 Excel 文件
+            df = pd.read_excel(file_path)
+            
+            # 检查必要的列是否存在
+            required_cols = [
+                DetailTableConfig.COL_PRODUCT_CODE,
+                DetailTableConfig.COL_COLOR,
+                DetailTableConfig.COL_SIZE,
+                DetailTableConfig.COL_JAN
+            ]
+            
+            for col in required_cols:
+                if col not in df.columns:
+                    raise ValueError(f"明细表中缺少列: {col}")
+            
+            # 构建映射字典
+            jan_map = {}
+            for _, row in df.iterrows():
+                # 转换为字符串并去除空白
+                product_code = str(row[DetailTableConfig.COL_PRODUCT_CODE]).strip()
+                # 处理颜色：去除小数点（如果是浮点数）
+                color_val = row[DetailTableConfig.COL_COLOR]
+                if isinstance(color_val, float) and color_val.is_integer():
+                    color = str(int(color_val))
+                else:
+                    color = str(color_val).strip()
+                    
+                # 处理尺码
+                size_val = row[DetailTableConfig.COL_SIZE]
+                if isinstance(size_val, float) and size_val.is_integer():
+                    size = str(int(size_val))
+                else:
+                    size = str(size_val).strip()
+                
+                # 处理JAN：去除小数点
+                jan_val = row[DetailTableConfig.COL_JAN]
+                if pd.notna(jan_val):
+                    if isinstance(jan_val, float):
+                        jan = str(int(jan_val))
+                    else:
+                        jan = str(jan_val).strip()
+                else:
+                    jan = ""
+                
+                key = (product_code, color, size)
+                if jan:
+                    jan_map[key] = jan
+            
+            return jan_map
+            
+        except Exception as e:
+            raise Exception(f"读取明细表失败: {e}")
 
 
 class AllocationTableReader:

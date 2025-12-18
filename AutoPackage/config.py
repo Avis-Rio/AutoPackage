@@ -61,6 +61,10 @@ class TemplateConfig:
     PRODUCT_LIST_COL_COLOR = 2   # カラー列
     PRODUCT_LIST_COL_SIZE = 3    # サイズ列
     PRODUCT_LIST_COL_JAN = 4     # JAN列
+    PRODUCT_LIST_COL_ORDER_QTY = 5 # 発注数列
+    PRODUCT_LIST_COL_SHIP_QTY = 6  # 出荷数列
+    PRODUCT_LIST_COL_DECREASE = 7  # 減産数列
+    PRODUCT_LIST_COL_INCREASE = 8  # 増産数列
     
     # 商品一覧页的管理No位置
     PRODUCT_LIST_KANRI_NO_ROW = 0
@@ -99,6 +103,16 @@ class TemplateConfig:
     PT_SKU_START_COL = 8        # SKU数据从第9列开始（0-indexed为8）
 
 
+# 明细表文件结构
+class DetailTableConfig:
+    """明细表文件结构配置"""
+    # 列名
+    COL_PRODUCT_CODE = '品番'
+    COL_COLOR = 'カラー'
+    COL_SIZE = 'サイズ'
+    COL_JAN = 'JAN'
+
+
 # 受渡伝票配置
 class DeliveryNoteConfig:
     """受渡伝票生成配置"""
@@ -125,6 +139,25 @@ class DeliveryNoteConfig:
     COL_INDEX_SIZE = 5          # F列
     COL_INDEX_COLOR = 6         # G列
     COL_INDEX_QTY = 7           # H列
+
+
+# アソート明細配置
+class AssortmentConfig:
+    """アソート明細生成配置"""
+    # 模板路径
+    TEMPLATE_NAME = "アソート明細模板.xlsx"
+    
+    # 写入起始位置
+    WRITE_START_ROW = 2         # Row 3 (0-indexed)
+    WRITE_START_COL = 1         # B列 (0-indexed)
+    
+    # 输出列索引 (0-indexed)
+    COL_INDEX_DELIVERY_CODE = 1      # B列: 届け先コード
+    COL_INDEX_DELIVERY_NAME = 2      # C列: 届け先名
+    COL_INDEX_SLIP_NO = 3            # D列: 受渡伝票
+    COL_INDEX_JAN = 4                # E列: JANコード
+    COL_INDEX_MANUFACTURER_CODE = 5  # F列: メーカー品番
+    COL_INDEX_QTY = 6                # G列: 汇总(数量)
 
 
 # 文件路径配置

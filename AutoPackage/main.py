@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 import glob
 
-from excel_reader import AllocationTableReader
+from excel_reader import AllocationTableReader, DetailTableReader
 from data_transformer import DataTransformer
 from template_writer import TemplateWriter
 from config import FileConfig
@@ -32,6 +32,7 @@ class AutoPackageApp:
         # 单文件模式变量
         self.allocation_file_path = tk.StringVar()
         self.template_file_path = tk.StringVar(value="template.xls")
+        self.detail_file_path = tk.StringVar()
         self.output_file_path = tk.StringVar()
         
         # 批量模式变量
@@ -123,10 +124,15 @@ class AutoPackageApp:
         ttk.Entry(self.single_file_frame, textvariable=self.template_file_path, width=60).grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(self.single_file_frame, text="浏览...", command=self._browse_template_file).grid(row=1, column=2, padx=5, pady=5)
         
+        # 明细表文件 (单文件模式)
+        ttk.Label(self.single_file_frame, text="明细表文件:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.single_file_frame, textvariable=self.detail_file_path, width=60).grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(self.single_file_frame, text="浏览...", command=self._browse_detail_file).grid(row=2, column=2, padx=5, pady=5)
+        
         # 输出文件
-        ttk.Label(self.single_file_frame, text="输出文件:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(self.single_file_frame, textvariable=self.output_file_path, width=60).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(self.single_file_frame, text="浏览...", command=self._browse_output_file).grid(row=2, column=2, padx=5, pady=5)
+        ttk.Label(self.single_file_frame, text="输出文件:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.single_file_frame, textvariable=self.output_file_path, width=60).grid(row=3, column=1, padx=5, pady=5)
+        ttk.Button(self.single_file_frame, text="浏览...", command=self._browse_output_file).grid(row=3, column=2, padx=5, pady=5)
         
         # 3b. 批量选择界面
         self.batch_file_frame = ttk.LabelFrame(self.file_container, text="批量设置", padding="10")
@@ -141,11 +147,16 @@ class AutoPackageApp:
         ttk.Entry(self.batch_file_frame, textvariable=self.template_file_path, width=60).grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(self.batch_file_frame, text="浏览...", command=self._browse_template_file).grid(row=1, column=2, padx=5, pady=5)
         
+        # 明细表文件 (批量模式复用同一个变量)
+        ttk.Label(self.batch_file_frame, text="明细表文件:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.batch_file_frame, textvariable=self.detail_file_path, width=60).grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(self.batch_file_frame, text="浏览...", command=self._browse_detail_file).grid(row=2, column=2, padx=5, pady=5)
+        
         # 输出文件夹 (可选)
-        ttk.Label(self.batch_file_frame, text="输出文件夹 (可选):").grid(row=2, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(self.batch_file_frame, textvariable=self.batch_output_dir, width=60).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(self.batch_file_frame, text="选择文件夹...", command=self._browse_batch_output_dir).grid(row=2, column=2, padx=5, pady=5)
-        ttk.Label(self.batch_file_frame, text="*留空则默认在配分表同级目录下创建输出文件", foreground="gray").grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(self.batch_file_frame, text="输出文件夹 (可选):").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.batch_file_frame, textvariable=self.batch_output_dir, width=60).grid(row=3, column=1, padx=5, pady=5)
+        ttk.Button(self.batch_file_frame, text="选择文件夹...", command=self._browse_batch_output_dir).grid(row=3, column=2, padx=5, pady=5)
+        ttk.Label(self.batch_file_frame, text="*留空则默认在配分表同级目录下创建输出文件", foreground="gray").grid(row=4, column=1, sticky=tk.W)
 
         # 初始化显示
         self._on_mode_change()
@@ -229,6 +240,15 @@ class AutoPackageApp:
         )
         if filename:
             self.template_file_path.set(filename)
+
+    def _browse_detail_file(self):
+        """浏览选择明细表文件"""
+        filename = filedialog.askopenfilename(
+            title="选择明细表文件",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        )
+        if filename:
+            self.detail_file_path.set(filename)
 
     def _browse_output_file(self):
         """浏览选择输出文件"""
@@ -356,6 +376,18 @@ class AutoPackageApp:
     def _do_batch_conversion(self, files):
         """执行批量转换"""
         try:
+            # 读取明细表
+            jan_map = {}
+            if self.detail_file_path.get():
+                try:
+                    self._log(f"读取明细表: {os.path.basename(self.detail_file_path.get())}")
+                    jan_map = DetailTableReader.read_jan_map(self.detail_file_path.get())
+                    self._log(f"  -> 明细表读取成功，加载了 {len(jan_map)} 条JANCODE映射")
+                except Exception as e:
+                    self._log(f"  -> 明细表读取失败: {e}", "ERROR")
+                    messagebox.showerror("错误", f"明细表读取失败: {e}")
+                    return
+
             total_files = len(files)
             success_count = 0
             fail_count = 0
@@ -391,7 +423,7 @@ class AutoPackageApp:
                             continue
                     
                     # 执行转换
-                    self._perform_single_conversion(file_path, self.template_file_path.get(), output_path)
+                    self._perform_single_conversion(file_path, self.template_file_path.get(), output_path, jan_map)
                     
                     self._log(f"  -> 成功生成: {output_filename}", "SUCCESS")
                     success_count += 1
@@ -418,7 +450,7 @@ class AutoPackageApp:
         finally:
             self.root.after(0, lambda: self.convert_button.config(state=tk.NORMAL))
 
-    def _perform_single_conversion(self, input_path, template_path, output_path):
+    def _perform_single_conversion(self, input_path, template_path, output_path, jan_map=None):
         """执行单个文件转换逻辑 (复用逻辑)"""
         self._log(f"读取配分表: {os.path.basename(input_path)}")
         
@@ -432,7 +464,7 @@ class AutoPackageApp:
         
         # 2. 数据转换
         self._log("  -> 正在进行数据转换和PT分组...")
-        transformer = DataTransformer(allocation_data)
+        transformer = DataTransformer(allocation_data, jan_map)
         transformed_data = transformer.transform()
         
         sku_count = len(transformed_data['skus'])
@@ -448,32 +480,47 @@ class AutoPackageApp:
     def _do_conversion(self):
         """执行单文件转换（在后台线程中）"""
         try:
-            self.progress_bar.config(mode='indeterminate')
-            self.progress_bar.start(10)
-            self._update_status("正在处理...")
-            
             input_path = self.allocation_file_path.get()
             template_path = self.template_file_path.get()
             output_path = self.output_file_path.get()
             
-            self._log(f"开始处理单个文件: {os.path.basename(input_path)}")
+            # 读取明细表
+            jan_map = {}
+            if self.detail_file_path.get():
+                try:
+                    self._log(f"读取明细表: {os.path.basename(self.detail_file_path.get())}")
+                    jan_map = DetailTableReader.read_jan_map(self.detail_file_path.get())
+                    self._log(f"  -> 明细表读取成功，加载了 {len(jan_map)} 条JANCODE映射")
+                except Exception as e:
+                    self._log(f"  -> 明细表读取失败: {e}", "ERROR")
+                    raise e
             
-            self._perform_single_conversion(input_path, template_path, output_path)
+            self._update_status("正在处理...")
             
-            self._log(f"转换成功！输出文件: {output_path}", "SUCCESS")
-            self._update_status("转换完成")
+            # 检查输出文件是否存在
+            if os.path.exists(output_path):
+                action = self._ask_overwrite_action(os.path.basename(output_path))
+                if action == 'skip':
+                    self._log("用户取消操作", "WARNING")
+                    self._update_status("已取消")
+                    return
             
-            self.root.after(0, lambda: messagebox.showinfo("成功", f"转换完成！\n\n输出文件:\n{output_path}"))
+            self._perform_single_conversion(input_path, template_path, output_path, jan_map)
+            
+            self._log("转换成功！", "SUCCESS")
+            self._update_status("完成")
+            self.progress_var.set(100)
+            
+            self.root.after(0, lambda: messagebox.showinfo("完成", "文件转换成功！"))
             
         except Exception as e:
-            error_msg = f"转换失败: {str(e)}"
-            self._log(error_msg, "ERROR")
-            self._update_status("转换失败")
-            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self._log(f"错误: {str(e)}", "ERROR")
+            self._update_status("错误")
+            self.root.after(0, lambda: messagebox.showerror("错误", str(e)))
             
         finally:
-            self.root.after(0, self.progress_bar.stop)
             self.root.after(0, lambda: self.convert_button.config(state=tk.NORMAL))
+            self.root.after(0, self.progress_bar.stop)
 
     def _update_status(self, status: str):
         """更新状态标签"""

@@ -5,19 +5,22 @@
 """
 from typing import Dict, List, Tuple
 from collections import defaultdict
+import re
 
 
 class DataTransformer:
     """数据转换器"""
     
-    def __init__(self, allocation_data: Dict):
+    def __init__(self, allocation_data: Dict, jan_map: Dict[Tuple[str, str, str], str] = None):
         """
         初始化转换器
         
         Args:
             allocation_data: 从AllocationTableReader读取的数据
+            jan_map: JANCODE映射字典 {(品番, 颜色, 尺码): JANCODE}
         """
         self.allocation_data = allocation_data
+        self.jan_map = jan_map or {}
         self.all_skus = []  # 所有唯一的SKU列表（排序后）
         self.pt_groups = []  # PT分组结果
         self.ctn_counter = 1  # 箱号计数器
@@ -35,10 +38,16 @@ class DataTransformer:
         # 2. 对SKU排序
         self._sort_skus()
         
-        # 3. 分析店铺配比并分组PT
+        # 3. 注入 JANCODE
+        self._inject_jancodes()
+        
+        # 4. 计算 SKU 总数
+        self._calculate_sku_totals()
+        
+        # 5. 分析店铺配比并分组PT
         self._group_by_pattern()
         
-        # 4. 分配箱号
+        # 5. 分配箱号
         self._assign_ctn_numbers()
         
         return {
@@ -46,6 +55,120 @@ class DataTransformer:
             'skus': self.all_skus,
             'pt_groups': self.pt_groups
         }
+    
+    def _clean_product_code(self, code):
+        """去除品番中的括号及内容，例如 '14003(2)' -> '14003'"""
+        # 将全角括号转为半角
+        code = str(code).replace('（', '(').replace('）', ')')
+        # 去除 (..) 内容
+        return re.sub(r'\(.*?\)', '', code).strip()
+
+    def _inject_jancodes(self):
+        """注入 JANCODE 到 SKU 信息中"""
+        self.logs = []
+        match_count = 0
+        fail_count = 0
+        
+        self.logs.append(f"开始匹配 JANCODE (明细表共 {len(self.jan_map)} 条)")
+        if self.jan_map:
+            self.logs.append(f"明细表键样例(前3): {list(self.jan_map.keys())[:3]}")
+
+        for sku in self.all_skus:
+            # 基础清理 & 品番去括号
+            original_p_code = str(sku['product_code']).strip()
+            p_code = self._clean_product_code(original_p_code)
+            
+            # 更新 sku 中的 product_code (写入模板时也生效)
+            if p_code != original_p_code:
+                # self.logs.append(f"品番清洗: {original_p_code} -> {p_code}")
+                sku['product_code'] = p_code
+            
+            color = str(sku['color']).strip()
+            size = str(sku['size']).strip()
+            
+            # 1. 精确匹配
+            key = (p_code, color, size)
+            jan = self.jan_map.get(key, "")
+            
+            # 2. 模糊匹配：尝试去除颜色前导零 (例如 '003' -> '3')
+            if not jan:
+                color_stripped = color.lstrip('0')
+                # 如果全是0，变成空串了，要恢复成'0'
+                if not color_stripped and '0' in color: color_stripped = "0"
+                
+                if color != color_stripped:
+                    key_retry = (p_code, color_stripped, size)
+                    jan = self.jan_map.get(key_retry, "")
+                    if jan:
+                        self.logs.append(f"模糊匹配成功(去零): {key} -> {key_retry}")
+
+            # 3. 模糊匹配：尝试去除尺码前导零 (例如 '09' -> '9')
+            if not jan:
+                size_stripped = size.lstrip('0')
+                if not size_stripped and '0' in size: size_stripped = "0"
+                
+                if size != size_stripped:
+                    key_retry = (p_code, color, size_stripped)
+                    jan = self.jan_map.get(key_retry, "")
+                    if jan:
+                        self.logs.append(f"模糊匹配成功(尺码去零): {key} -> {key_retry}")
+                        
+            # 4. 组合拳 (颜色尺码都去零)
+            if not jan:
+                color_stripped = color.lstrip('0') or "0"
+                size_stripped = size.lstrip('0') or "0"
+                key_retry = (p_code, color_stripped, size_stripped)
+                jan = self.jan_map.get(key_retry, "")
+                if jan:
+                     self.logs.append(f"模糊匹配成功(双去零): {key} -> {key_retry}")
+
+            if jan:
+                sku['jan_code'] = jan
+                match_count += 1
+            else:
+                fail_count += 1
+                if fail_count <= 5:
+                    self.logs.append(f"匹配失败: {key}")
+        
+        self.logs.append(f"JANCODE 匹配结果: 成功 {match_count}, 失败 {fail_count}")
+
+    def _calculate_sku_totals(self):
+        """计算每个SKU的全局总数量"""
+        # 初始化计数器
+        sku_totals = defaultdict(int) # key: (product_code, color, size)
+        
+        # 调试日志
+        debug_count = 0
+        
+        for product_data in self.allocation_data['products']:
+            # 使用清洗后的品番
+            product_code = self._clean_product_code(product_data['product_code'])
+            
+            for store in product_data['stores']:
+                for sku_key, qty in store['sku_quantities'].items():
+                    # sku_key 是 "Color_Size"
+                    if '_' in sku_key:
+                        parts = sku_key.rsplit('_', 1)
+                        color = parts[0]
+                        size = parts[1]
+                        
+                        key = (product_code, color, size)
+                        sku_totals[key] += qty
+                        
+                        if debug_count < 3:
+                            # print(f"DEBUG: Accumulate {key} += {qty}")
+                            debug_count += 1
+        
+        # 将总数注入到 self.all_skus
+        inject_count = 0
+        for sku in self.all_skus:
+            key = (sku['product_code'], sku['color'], sku['size'])
+            total = sku_totals.get(key, 0)
+            sku['total_qty'] = total
+            if total > 0:
+                inject_count += 1
+                
+        self.logs.append(f"SKU总数计算完成: {inject_count} 个SKU有数量")
     
     def _aggregate_skus(self):
         """聚合所有品番中的SKU"""
@@ -85,7 +208,8 @@ class DataTransformer:
         merged_stores_map = {}
         
         for product_data in self.allocation_data['products']:
-            product_code = product_data['product_code']
+            # 使用清洗后的品番，确保与sku中的key一致
+            product_code = self._clean_product_code(product_data['product_code'])
             
             for store in product_data['stores']:
                 # 修改聚合逻辑：仅使用 store_code 作为唯一标识，忽略 type
