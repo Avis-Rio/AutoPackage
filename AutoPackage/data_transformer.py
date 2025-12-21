@@ -24,6 +24,10 @@ class DataTransformer:
         self.all_skus = []  # 所有唯一的SKU列表（排序后）
         self.pt_groups = []  # PT分组结果
         self.ctn_counter = 1  # 箱号计数器
+        self.logs = []
+        self.jan_map_count = len(self.jan_map)
+        self.jan_match_success = 0
+        self.jan_match_fail = 0
         
     def transform(self) -> Dict:
         """
@@ -131,6 +135,9 @@ class DataTransformer:
                     self.logs.append(f"匹配失败: {key}")
         
         self.logs.append(f"JANCODE 匹配结果: 成功 {match_count}, 失败 {fail_count}")
+        self.jan_map_count = len(self.jan_map)
+        self.jan_match_success = match_count
+        self.jan_match_fail = fail_count
 
     def _calculate_sku_totals(self):
         """计算每个SKU的全局总数量"""
@@ -349,9 +356,18 @@ class DataTransformer:
     
     def _assign_ctn_numbers(self):
         """为每个PT组中的店铺分配箱号"""
+        global_seq_no = 1 # 全局顺序编号，从0001开始
+        
         for pt_group in self.pt_groups:
-            for store in pt_group['stores']:
-                # 每个店铺的每个タイプ分配一个箱号
+            for idx, store in enumerate(pt_group['stores']):
+                # 记录在PT组内的序号（从1开始）
+                store['pt_local_idx'] = idx + 1
+                
+                # 分配全局顺序号 (用于G列和Slip No)
+                store['global_seq_no'] = global_seq_no
+                global_seq_no += 1
+                
+                # 每个店铺的每个タイプ分配一个箱号 (保留原有ctn_counter逻辑，或者如果ctn_counter就是全局号的话可以直接用)
                 store['ctn_no'] = self.ctn_counter
                 self.ctn_counter += 1
                 

@@ -141,11 +141,20 @@ class DeliveryNoteConfig:
     COL_INDEX_QTY = 7           # H列
 
 
+# 配分表文件结构
+class AllocationConfig:
+    """配分表配置"""
+    TEMPLATE_NAME = "①箱设定_模板（配分表用）.xlsx"
+
+# ... (AllocationTableConfig remains same)
+
+# ...
+
 # アソート明細配置
 class AssortmentConfig:
     """アソート明細生成配置"""
     # 模板路径
-    TEMPLATE_NAME = "アソート明細模板.xlsx"
+    TEMPLATE_NAME = "②アソート明細_模板.xlsx"
     
     # 写入起始位置
     WRITE_START_ROW = 2         # Row 3 (0-indexed)
@@ -160,10 +169,31 @@ class AssortmentConfig:
     COL_INDEX_QTY = 6                # G列: 汇总(数量)
 
 
+# 各店铺明细配置
+class StoreDetailConfig:
+    """各店铺明细生成配置"""
+    # 模板路径
+    TEMPLATE_NAME = "④各店铺明细_模板.xlsx"
+    
+    # 写入起始位置
+    WRITE_START_ROW = 7         # B8 -> row 7 (0-indexed)
+    WRITE_START_COL = 1         # B列 (0-indexed)
+    
+    # 列索引 (0-indexed)
+    COL_INDEX_SLIP_NO = 1       # B列
+    COL_INDEX_BRAND = 2         # C列
+    COL_INDEX_STORE_CODE = 3    # D列
+    COL_INDEX_PRODUCT_CODE = 4  # E列
+    COL_INDEX_SIZE = 5          # F列
+    COL_INDEX_COLOR = 6         # G列
+    COL_INDEX_QTY = 7           # H列
+
+
+
 # 文件路径配置
 class FileConfig:
     """文件路径配置"""
-    DEFAULT_TEMPLATE_NAME = "template.xlsx"
+    DEFAULT_TEMPLATE_NAME = "①箱设定_模板（配分表用）.xlsx"
     OUTPUT_FILE_PREFIX = "【箱設定　上海】"
     OUTPUT_FILE_SUFFIX = "_振分.xlsx"
 

@@ -403,12 +403,13 @@ class TemplateWriter:
             row_num = TemplateConfig.PT_DATA_START_ROW + 1 + idx
             last_row_num = row_num
             
-            # No. - Generate 4 digit ID
+            # No. - Generate 4 digit ID (PT_NUM + 3 digit Local Index)
             try:
                 # Extract PT number (e.g., PT-1 -> 1)
                 pt_num = int(pt_name.split('-')[1])
-                store_no = int(store.get('no', 0))
-                new_id = f"{pt_num}{store_no:03d}"
+                # Use PT local index instead of original No to ensure sequence
+                local_idx = store.get('pt_local_idx', idx + 1)
+                new_id = f"{pt_num}{local_idx:03d}"
             except:
                 new_id = store.get('no', '')
             
@@ -436,16 +437,19 @@ class TemplateWriter:
             cell.value = store['store_name']
             self._copy_cell_style(sheet, template_row, 5, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
             
-            # CTN_NO（黄色背景）- 暂时禁用写入（用户要求由仓库填写）
+            # CTN_NO（黄色背景）- 用户要求在G列填入自动生成的序号(0001顺序)
             cell = sheet.cell(row=row_num, column=6)
             # cell.value = store['ctn_no'] # 暂时注释掉
-            cell.value = "" # 留空
+            cell.value = "" # F列 (CTN_NO标题) 留空
             self._copy_cell_style(sheet, template_row, 6, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
             
-            # パターン
+            # パターン (G列) -> 现在用来填入 全局顺序号
             cell = sheet.cell(row=row_num, column=7)
-            cell.value = ""
+            global_seq = store.get('global_seq_no', 0)
+            cell.value = f"{global_seq:04d}" if global_seq else ""
             self._copy_cell_style(sheet, template_row, 7, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
+            # 确保G列也是居中对齐
+            cell.alignment = Alignment(horizontal='center', vertical='center')
             
             # 合計
             store_total = store['total_qty']

@@ -1,0 +1,23 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./temp_uploads:/app/temp_uploads"
+      - "./temp_outputs:/app/temp_outputs"
+      - "./templates:/app/templates"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./react_scaffold
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+

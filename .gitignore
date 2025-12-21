@@ -35,3 +35,19 @@ test_output.xls
 test_output.xlsx
 AutoPackage/test_output.xls
 AutoPackage/test_output.xlsx
+
+# Web App
+node_modules/
+react_scaffold/node_modules/
+react_scaffold/dist/
+react_scaffold/.vite/
+web_server/static/assets/
+
+# Database
+*.db
+web_server/*.db
+
+# Storage
+storage/
+uploads/
+outputs/
