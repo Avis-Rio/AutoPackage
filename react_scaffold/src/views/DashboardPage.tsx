@@ -56,19 +56,23 @@ function ModeTab({
   mode,
   current,
   onClick,
-  label
+  label,
+  className = "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-slate-900"
 }: {
   mode: ConvertMode;
   current: ConvertMode;
   onClick: (m: ConvertMode) => void;
   label: string;
+  className?: string;
 }) {
   return (
     <button
       onClick={() => onClick(mode)}
       className={[
-        "px-2 py-1 rounded-md text-xs font-medium",
-        current === mode ? "bg-slate-900 text-white" : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+        "px-2 py-2 rounded-md text-xs font-medium transition-colors w-full",
+        current === mode 
+          ? "bg-slate-900 text-white shadow-md" 
+          : className
       ].join(" ")}
     >
       {label}
@@ -143,6 +147,10 @@ export function DashboardPage() {
     addLog(`添加了 ${newFiles.length} 个文件`);
   }
 
+  async function onPickFactoryFile(e: React.ChangeEvent<HTMLInputElement>) {
+    // Deprecated
+  }
+
   async function processOne(item: FileItem, index: number) {
     setFileList((prev) => {
       const next = [...prev];
@@ -151,23 +159,42 @@ export function DashboardPage() {
     });
     addLog(`[${item.file.name}] 开始处理...`);
     try {
-      const res = await convertApi.convert({
-        file: item.file,
-        mode,
-        templateFile,
-        templateName: selectedLibTemplate || null,
-        detailFile,
-        weekNum: mode === "assortment" ? weekNum : null
-      });
+      let res: ConvertResponse;
+      
+      if (mode === "box_label") {
+        // Special handling for box label generation
+        res = await convertApi.generateLabelsFromFile(item.file);
+      } else {
+        // Standard conversion
+        res = await convertApi.convert({
+          file: item.file,
+          mode,
+          templateFile,
+          templateName: selectedLibTemplate || null,
+          detailFile,
+          weekNum: mode === "assortment" ? weekNum : null
+        });
+      }
+
       if (res.status !== "success") throw new Error(res.message || "Convert failed");
+      
       addLog(`[${item.file.name}] 处理成功`);
+      if (res.message) addLog(`> ${res.message}`);
       if (res.logs?.length) res.logs.forEach((l) => addLog(`> ${l}`));
+      
       if (res.stats?.store_count || res.stats?.sku_count || res.stats?.box_count) {
         addLog(
           `[${item.file.name}] 汇总: 店铺 ${formatNumber(res.stats.store_count)}, 箱数 ${formatNumber(
             res.stats.box_count
           )}, SKU ${formatNumber(res.stats.sku_count)}, PT ${formatNumber(res.stats.pt_count)}, 总枚数 ${formatNumber(res.stats.total_qty)}`
         );
+      }
+
+      // Auto download for box labels if URL provided
+      // Explicitly disable auto-download for box_label mode
+      if (res.download_url && mode !== "box_label") {
+        addLog(`[${item.file.name}] 准备下载...`);
+        window.open(res.download_url, "_blank");
       }
 
       setFileList((prev) => {
@@ -202,19 +229,57 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <div className="text-2xl font-bold">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2">
+          <div className="text-2xl font-bold text-slate-900">
             {mode === "allocation" && "箱设定明细作成工具"}
             {mode === "delivery_note" && "受渡伝票作成工具"}
             {mode === "assortment" && "アソート明細作成工具"}
+            {mode === "box_label" && "箱贴作成工具"}
           </div>
-          <div className="text-slate-500 mt-1 text-sm">Vite + React 工程化迁移骨架（可直连当前 FastAPI API）</div>
+          <div className="text-slate-500 mt-2 text-sm leading-relaxed">
+            {mode === "allocation" && "上传WD系统下载的【配分表】和【明细表】，自动转化为【箱设定明细】和【各店铺明细表】"}
+            {mode === "delivery_note" && "根据仓库返回真实分箱明细自动生成【受渡伝票】用于上传WD系统"}
+            {mode === "assortment" && "根据仓库返回真实分箱明细自动生成【アソート明細】"}
+            {mode === "box_label" && "根据仓库返回真实分箱明细和WD系统的【物流管理表】自动生成【箱贴明细】"}
+          </div>
         </div>
-        <div className="flex gap-2">
-          <ModeTab mode="allocation" current={mode} onClick={setMode} label="箱设定明细作成" />
-          <ModeTab mode="delivery_note" current={mode} onClick={setMode} label="受渡伝票作成" />
-          <ModeTab mode="assortment" current={mode} onClick={setMode} label="アソート明細作成" />
+        
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2 mb-3 px-1 border-b border-slate-100 pb-2">
+            <span className="text-lg">🔁</span>
+            <span className="font-semibold text-slate-700 text-sm">Switch</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <ModeTab 
+              mode="allocation" 
+              current={mode} 
+              onClick={setMode} 
+              label="箱设定明细" 
+              className="bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
+            />
+            <ModeTab 
+              mode="delivery_note" 
+              current={mode} 
+              onClick={setMode} 
+              label="受渡伝票" 
+              className="bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+            />
+            <ModeTab 
+              mode="assortment" 
+              current={mode} 
+              onClick={setMode} 
+              label="アソート明細" 
+              className="bg-cyan-50 text-cyan-700 border border-cyan-200 hover:bg-cyan-100"
+            />
+            <ModeTab 
+              mode="box_label" 
+              current={mode} 
+              onClick={setMode} 
+              label="箱贴作成" 
+              className="bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
+            />
+          </div>
         </div>
       </div>
 
@@ -228,17 +293,19 @@ export function DashboardPage() {
                 <MetricBadge label="店铺" value={successStats.store_count} />
                 <MetricBadge label="箱数" value={successStats.box_count} />
                 <MetricBadge label="总枚数" value={successStats.total_qty} />
-                {mode === "allocation" ? (
+                {mode === "allocation" || mode === "box_label" ? (
                   <>
                     <MetricBadge label="SKU" value={successStats.sku_count} />
                     <MetricBadge label="PT" value={successStats.pt_count} />
-                    <span className="inline-flex items-center gap-2">
-                      <Badge variant="neutral">JAN</Badge>
-                      <span className="text-xs text-slate-600">
-                        明细 {formatNumber(successStats.jan_map_count)} / 匹配 {formatNumber(successStats.jan_match_success)} /
-                        失败 {formatNumber(successStats.jan_match_fail)}
+                    {mode === "allocation" && (
+                      <span className="inline-flex items-center gap-2">
+                        <Badge variant="neutral">JAN</Badge>
+                        <span className="text-xs text-slate-600">
+                          明细 {formatNumber(successStats.jan_map_count)} / 匹配 {formatNumber(successStats.jan_match_success)} /
+                          失败 {formatNumber(successStats.jan_match_fail)}
+                        </span>
                       </span>
-                    </span>
+                    )}
                   </>
                 ) : null}
               </div>
@@ -264,7 +331,7 @@ export function DashboardPage() {
                 </div>
               </div>
 
-              <div className="border border-dashed border-slate-300 rounded-lg p-4 bg-slate-50">
+              <div className="border border-dashed border-slate-300 rounded-lg p-4 bg-slate-50 flex flex-col items-center justify-center min-h-[120px] gap-3">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -276,90 +343,107 @@ export function DashboardPage() {
                     e.target.value = "";
                   }}
                 />
+                
+                <div className="text-center">
+                  {mode === "box_label" ? (
+                    <>
+                      <div className="text-slate-900 font-medium mb-1">请上传工厂返还的箱设定明细表</div>
+                      <div className="text-slate-500 text-xs">支持 .xlsx 格式，需包含 PT-xx 页</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-slate-900 font-medium mb-1">请选择源文件</div>
+                      <div className="text-slate-500 text-xs">支持 .xls, .xlsx 格式</div>
+                    </>
+                  )}
+                </div>
+
                 <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
                   选择文件（支持多选）
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">模板选择</div>
-                  <select
-                    className="w-full border border-slate-300 rounded-md px-2 py-1 text-xs bg-white h-8"
-                    value={selectedLibTemplate}
-                    onChange={(e) => {
-                      setSelectedLibTemplate(e.target.value);
-                      setTemplateFile(null);
-                      if (templateInputRef.current) templateInputRef.current.value = "";
-                    }}
-                  >
-                    <option value="">使用系统默认模板</option>
-                    {templates.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="flex items-center gap-2">
-                    <input
-                      ref={templateInputRef}
-                      type="file"
-                      className="hidden"
-                      accept=".xls,.xlsx"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0] ?? null;
-                        setTemplateFile(f);
-                        if (f) setSelectedLibTemplate("");
-                      }}
-                    />
-                    <Button variant="outline" size="sm" onClick={() => templateInputRef.current?.click()}>
-                      上传自定义模板
-                    </Button>
-                    <div className="text-xs text-slate-500 truncate">{templateFile ? templateFile.name : "未选择"}</div>
-                  </div>
-                </div>
-
-                {mode === "allocation" ? (
+              {mode !== "box_label" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">
-                      明细表 <span className="text-red-600 text-xs">必填</span>
-                    </div>
-                    <input
-                      ref={detailInputRef}
-                      type="file"
-                      className="hidden"
-                      accept=".xls,.xlsx"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0] ?? null;
-                        setDetailFile(f);
-                      }}
-                    />
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => detailInputRef.current?.click()}>
-                        选择明细表
-                      </Button>
-                      <div className="text-xs text-slate-500 truncate flex-1">{detailFile ? detailFile.name : "未选择"}</div>
-                      {detailFile ? (
-                        <Button variant="danger" size="xs" onClick={() => setDetailFile(null)}>
-                          清除
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : mode === "assortment" ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">本年度周数（Week Number）</div>
-                    <input
+                    <div className="text-sm font-medium">模板选择</div>
+                    <select
                       className="w-full border border-slate-300 rounded-md px-2 py-1 text-xs bg-white h-8"
-                      value={weekNum}
-                      onChange={(e) => setWeekNum(e.target.value)}
-                      placeholder="例如：42 或 42W"
-                    />
+                      value={selectedLibTemplate}
+                      onChange={(e) => {
+                        setSelectedLibTemplate(e.target.value);
+                        setTemplateFile(null);
+                        if (templateInputRef.current) templateInputRef.current.value = "";
+                      }}
+                    >
+                      <option value="">使用系统默认模板</option>
+                      {templates.map((t) => (
+                        <option key={t.name} value={t.name}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={templateInputRef}
+                        type="file"
+                        className="hidden"
+                        accept=".xls,.xlsx"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          setTemplateFile(f);
+                          if (f) setSelectedLibTemplate("");
+                        }}
+                      />
+                      <Button variant="outline" size="sm" onClick={() => templateInputRef.current?.click()}>
+                        上传自定义模板
+                      </Button>
+                      <div className="text-xs text-slate-500 truncate">{templateFile ? templateFile.name : "未选择"}</div>
+                    </div>
                   </div>
-                ) : (
-                  <div />
-                )}
-              </div>
+
+                  {mode === "allocation" ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">
+                        明细表 <span className="text-red-600 text-xs">必填</span>
+                      </div>
+                      <input
+                        ref={detailInputRef}
+                        type="file"
+                        className="hidden"
+                        accept=".xls,.xlsx"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null;
+                          setDetailFile(f);
+                        }}
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => detailInputRef.current?.click()}>
+                          选择明细表
+                        </Button>
+                        <div className="text-xs text-slate-500 truncate flex-1">{detailFile ? detailFile.name : "未选择"}</div>
+                        {detailFile ? (
+                          <Button variant="danger" size="xs" onClick={() => setDetailFile(null)}>
+                            清除
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : mode === "assortment" ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">本年度周数（Week Number）</div>
+                      <input
+                        className="w-full border border-slate-300 rounded-md px-2 py-1 text-xs bg-white h-8"
+                        value={weekNum}
+                        onChange={(e) => setWeekNum(e.target.value)}
+                        placeholder="例如：42 或 42W"
+                      />
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <div className="text-sm font-medium">待处理文件</div>

@@ -20,6 +20,12 @@ export const convertApi = {
     if (req.detailFile) formData.append("detail_file", req.detailFile);
     if (req.weekNum) formData.append("week_num", req.weekNum);
     return await httpClient.postForm("/api/convert", formData);
+  },
+
+  async generateLabelsFromFile(file: File): Promise<ConvertResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+    return await httpClient.postForm("/api/generate-labels-from-file", formData);
   }
 };
 

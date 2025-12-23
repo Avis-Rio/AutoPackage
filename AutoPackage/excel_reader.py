@@ -5,9 +5,187 @@ Excel读取模块 - 读取配分表数据
 """
 import xlrd
 import openpyxl
-from config import AllocationTableConfig, DetailTableConfig
+from config import AllocationTableConfig, DetailTableConfig, TemplateConfig
 from typing import Dict, List, Tuple
 import pandas as pd
+from openpyxl import load_workbook
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class BoxSettingReader:
+    """读取工厂返回的箱设定明细表（经过人工分箱处理）"""
+    
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        
+    def read(self) -> List[Dict]:
+        """
+        读取所有PT页的箱明细数据
+        
+        Returns:
+            List[Dict]: 箱数据列表
+        """
+        try:
+            logger.info(f"Loading box setting file: {self.file_path}")
+            wb = load_workbook(self.file_path, data_only=True)
+            all_boxes = []
+            
+            for sheet_name in wb.sheetnames:
+                # 跳过商品一覧页
+                if sheet_name == TemplateConfig.PRODUCT_LIST_SHEET:
+                    continue
+                
+                sheet = wb[sheet_name]
+                
+                # 验证是否为PT页 (检查表头 A5)
+                # 1-indexed: Row 5, Col 1
+                header_cell = sheet.cell(row=TemplateConfig.PT_DATA_HEADER_ROW + 1, column=TemplateConfig.PT_COL_NO + 1)
+                # 注意：TemplateWriter可能写入的是"No."，也可能只是该行开始数据
+                # Check header value explicitly
+                # Writer: sheet.cell(row=5, column=1).value = "No."
+                if header_cell.value != "No.":
+                    logger.debug(f"Skipping sheet {sheet_name}: Not a PT sheet (A5 != No.)")
+                    continue
+                    
+                logger.info(f"Processing sheet: {sheet_name}")
+                sheet_boxes = self._process_sheet(sheet, sheet_name)
+                all_boxes.extend(sheet_boxes)
+            
+            logger.info(f"Total boxes loaded: {len(all_boxes)}")
+            return all_boxes
+            
+        except Exception as e:
+            logger.error(f"Error reading box setting file: {e}")
+            raise
+
+    def _process_sheet(self, sheet, sheet_name) -> List[Dict]:
+        """处理单个PT页"""
+        # 1. 读取SKU列定义
+        skus = []
+        col_idx = 0
+        while True:
+            # 1-indexed column
+            col = TemplateConfig.PT_SKU_START_COL + 1 + col_idx
+            
+            # 检查是否有品番 (Row 2)
+            prod_code = sheet.cell(row=2, column=col).value
+            if not prod_code:
+                break
+                
+            skus.append({
+                'product_code': str(prod_code),
+                'jan_code': str(sheet.cell(row=1, column=col).value or ''),
+                'color': str(sheet.cell(row=3, column=col).value or ''),
+                'size': str(sheet.cell(row=4, column=col).value or '')
+            })
+            col_idx += 1
+            
+        # 2. 读取元数据
+        # E1: 管理No
+        kanri_no = str(sheet.cell(row=1, column=5).value or '')
+        # E4: 納期 (这里作为 Store Date / Delivery Date)
+        delivery_date = str(sheet.cell(row=4, column=5).value or '')
+        
+        # 3. 读取数据行
+        box_map = {} # Key: ctn_no -> BoxData
+        
+        row = TemplateConfig.PT_DATA_START_ROW + 1 # Row 6
+        last_ctn_no = None
+        last_store_code = None
+        last_store_name = None
+        last_pattern = None
+        
+        while row <= sheet.max_row:
+            # 检查 CTN_NO 列 (F列, Col 6)
+            ctn_no_val = sheet.cell(row=row, column=TemplateConfig.PT_COL_CTN_NO + 1).value
+            store_code_val = sheet.cell(row=row, column=TemplateConfig.PT_COL_STORE_CODE + 1).value
+            
+            # 如果整行关键数据为空，可能是空行，也可能是结束
+            if ctn_no_val is None and store_code_val is None:
+                # 检查是否所有SKU数据也为空，如果是，则跳过
+                is_empty = True
+                for i in range(len(skus)):
+                    if sheet.cell(row=row, column=TemplateConfig.PT_SKU_START_COL + 1 + i).value:
+                        is_empty = False
+                        break
+                
+                if is_empty:
+                    # 连续空行超过10行则停止
+                    # 这里简单判断：如果后面还有数据则继续，否则结束？
+                    # 为简单起见，如果 A列 No. 也没了，就结束
+                    if sheet.cell(row=row, column=1).value is None:
+                        # 再次确认下一行，防止中间空行
+                        if sheet.cell(row=row+1, column=1).value is None:
+                            break
+                    row += 1
+                    continue
+                
+                # 如果有SKU数据但没有CTN/Store，假设是上一行的延续
+                if last_ctn_no is not None:
+                    ctn_no_val = last_ctn_no
+                    store_code_val = last_store_code
+                else:
+                    row += 1
+                    continue
+            else:
+                # 更新上下文
+                last_ctn_no = ctn_no_val
+                last_store_code = store_code_val
+                last_store_name = sheet.cell(row=row, column=TemplateConfig.PT_COL_STORE_NAME + 1).value
+                last_pattern = sheet.cell(row=row, column=TemplateConfig.PT_COL_PATTERN + 1).value
+            
+            # 确保有 ctn_no
+            if not last_ctn_no:
+                row += 1
+                continue
+                
+            key = str(last_ctn_no)
+            
+            if key not in box_map:
+                dept = kanri_no[:3] if len(kanri_no) >= 3 else kanri_no
+                
+                box_map[key] = {
+                    'ctn_no': last_ctn_no,
+                    'store_code': last_store_code,
+                    'store_name': last_store_name,
+                    'pattern': last_pattern,
+                    'delivery_date': delivery_date, # 出区日
+                    'store_date': delivery_date,    # 店着日 (暂同)
+                    'dept': dept,
+                    'kanri_no': kanri_no,
+                    'total_qty': 0,
+                    'items': []
+                }
+            
+            # 读取SKU数据
+            for i, sku in enumerate(skus):
+                qty_col = TemplateConfig.PT_SKU_START_COL + 1 + i
+                qty_val = sheet.cell(row=row, column=qty_col).value
+                
+                if qty_val and isinstance(qty_val, (int, float)) and qty_val > 0:
+                    qty = int(qty_val)
+                    # 查找是否已存在该SKU (合并多行情况)
+                    existing_item = next((item for item in box_map[key]['items'] 
+                                        if item['maker_code'] == f"{sku['product_code']}-{sku['color']}-{sku['size']}"), None)
+                    
+                    if existing_item:
+                        existing_item['qty'] += qty
+                    else:
+                        box_map[key]['items'].append({
+                            'maker_code': f"{sku['product_code']}-{sku['color']}-{sku['size']}",
+                            'product_name': '',
+                            'qty': qty
+                        })
+                    
+                    box_map[key]['total_qty'] += qty
+            
+            row += 1
+            
+        return list(box_map.values())
 
 
 class DetailTableReader:

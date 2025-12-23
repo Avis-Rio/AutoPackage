@@ -1,4 +1,4 @@
-export type ConvertMode = "allocation" | "delivery_note" | "assortment";
+export type ConvertMode = "allocation" | "delivery_note" | "assortment" | "box_label";
 
 export type ConvertResponse = {
   status: "success" | "error";

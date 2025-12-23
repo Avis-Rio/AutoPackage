@@ -3,6 +3,8 @@
 """
 配置文件 - 定义常量和文件结构映射
 """
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
 
 # 配分表文件结构
 class AllocationTableConfig:
@@ -117,7 +119,7 @@ class DetailTableConfig:
 class DeliveryNoteConfig:
     """受渡伝票生成配置"""
     # 模板路径
-    TEMPLATE_NAME = "③受渡伝票_模板（上传系统资料）.xls"
+    TEMPLATE_NAME = "③受渡伝票_模板（上传系统资料）.xlsx"
     
     # 写入起始位置
     WRITE_START_ROW = 7         # B8 -> row 7 (0-indexed)
@@ -146,9 +148,6 @@ class AllocationConfig:
     """配分表配置"""
     TEMPLATE_NAME = "①箱设定_模板（配分表用）.xlsx"
 
-# ... (AllocationTableConfig remains same)
-
-# ...
 
 # アソート明細配置
 class AssortmentConfig:
@@ -188,6 +187,24 @@ class StoreDetailConfig:
     COL_INDEX_COLOR = 6         # G列
     COL_INDEX_QTY = 7           # H列
 
+
+# 箱贴配置
+class BoxLabelConfig:
+    """箱贴配置"""
+    LABEL_WIDTH = 100 * mm   # 100mm
+    LABEL_HEIGHT = 120 * mm  # 120mm
+    LABELS_PER_PAGE = 4      # 每页4张
+    COLS = 2                 # 2列
+    ROWS = 2                 # 2行
+    
+    # 页面边距 (居中排版)
+    PAGE_WIDTH, PAGE_HEIGHT = A4  # 210mm × 297mm
+    MARGIN_X = (PAGE_WIDTH - LABEL_WIDTH * 2) / 2
+    MARGIN_Y = (PAGE_HEIGHT - LABEL_HEIGHT * 2) / 2
+    
+    # 字体配置
+    FONT_NAME = "NotoSansJP"
+    FONT_PATH = "fonts/NotoSansCJKjp-Regular.otf"  # 相对路径
 
 
 # 文件路径配置

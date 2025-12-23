@@ -44,5 +44,17 @@ export const historyApi = {
     preview: async (id: number) => {
         const data = await httpClient.getJson<PreviewData>(`/api/history/${id}/preview`);
         return data;
+    },
+
+    generateLabels: async (id: number) => {
+        const formData = new FormData();
+        formData.append("history_id", id.toString());
+        
+        const res = await httpClient.postForm<{
+            status: string;
+            download_url: string;
+            filename: string;
+        }>("/api/generate-labels", formData);
+        return res;
     }
 };

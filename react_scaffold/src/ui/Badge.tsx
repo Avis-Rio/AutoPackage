@@ -1,6 +1,6 @@
 import type { PropsWithChildren } from "react";
 
-export type BadgeVariant = "neutral" | "info" | "success" | "warning" | "error";
+export type BadgeVariant = "neutral" | "info" | "success" | "warning" | "error" | "purple" | "orange" | "cyan";
 
 export function Badge({ children, variant = "neutral" }: PropsWithChildren<{ variant?: BadgeVariant }>) {
   const styles: Record<BadgeVariant, string> = {
@@ -8,7 +8,10 @@ export function Badge({ children, variant = "neutral" }: PropsWithChildren<{ var
     info: "bg-blue-50 text-blue-800 border-blue-200",
     success: "bg-emerald-50 text-emerald-800 border-emerald-200",
     warning: "bg-amber-50 text-amber-900 border-amber-200",
-    error: "bg-rose-50 text-rose-800 border-rose-200"
+    error: "bg-rose-50 text-rose-800 border-rose-200",
+    purple: "bg-purple-50 text-purple-800 border-purple-200",
+    orange: "bg-orange-50 text-orange-800 border-orange-200",
+    cyan: "bg-cyan-50 text-cyan-800 border-cyan-200"
   };
 
   return (

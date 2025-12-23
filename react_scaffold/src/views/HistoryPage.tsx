@@ -169,6 +169,21 @@ export const HistoryPage: React.FC = () => {
         }
     };
 
+    const getModeBadge = (mode: string) => {
+        switch (mode) {
+            case "allocation":
+                return <Badge variant="purple">配分表</Badge>;
+            case "delivery_note":
+                return <Badge variant="orange">受渡伝票</Badge>;
+            case "assortment":
+                return <Badge variant="cyan">Assortment</Badge>;
+            case "box_label":
+                return <Badge variant="neutral">箱贴作成</Badge>;
+            default:
+                return <Badge>{mode}</Badge>;
+        }
+    };
+
     const getStatusBadge = (status: string) => {
         switch (status) {
             case "success":
@@ -285,9 +300,7 @@ export const HistoryPage: React.FC = () => {
                                             </div>
                                         </td>
                                         <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
-                                            {record.mode === "allocation" && "配分表"}
-                                            {record.mode === "delivery_note" && "受渡伝票"}
-                                            {record.mode === "assortment" && "Assortment"}
+                                            {getModeBadge(record.mode)}
                                         </td>
                                         <td className="px-3 py-2 whitespace-nowrap">
                                             {getStatusBadge(record.status)}
@@ -332,6 +345,7 @@ export const HistoryPage: React.FC = () => {
                                                         </Button>
                                                     </>
                                                 )}
+
                                                 <Button
                                                     size="xs"
                                                     variant="secondary"
@@ -487,15 +501,17 @@ export const HistoryPage: React.FC = () => {
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    {previewData.columns.map((col, i) => (
-                                        <th key={i} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 border-r last:border-r-0">
-                                            {col}
+                                    {/* Use first row as header if available, otherwise use columns */}
+                                    {(previewData.data.length > 0 ? previewData.data[0] : previewData.columns).map((col: any, i: number) => (
+                                        <th key={i} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 border-r last:border-r-0 whitespace-nowrap">
+                                            {String(col || "")}
                                         </th>
                                     ))}
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {previewData.data.map((row, i) => (
+                                {/* Skip first row if we used it as header */}
+                                {previewData.data.slice(previewData.data.length > 0 ? 1 : 0).map((row, i) => (
                                     <tr key={i} className="hover:bg-gray-50">
                                         {row.map((cell, j) => (
                                             <td key={j} className="px-3 py-1.5 text-xs text-gray-700 border-r last:border-r-0 whitespace-nowrap">

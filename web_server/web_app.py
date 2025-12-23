@@ -33,13 +33,14 @@ from pydantic import BaseModel
 
 # 导入现有业务逻辑
 try:
-    from excel_reader import AllocationTableReader, DetailTableReader
+    from excel_reader import AllocationTableReader, DetailTableReader, BoxSettingReader
     from data_transformer import DataTransformer
     from template_writer import TemplateWriter
     from delivery_note_generator import DeliveryNoteGenerator
     from assortment_generator import AssortmentGenerator
     from store_detail_writer import StoreDetailWriter
-    from config import FileConfig, DeliveryNoteConfig, AssortmentConfig, StoreDetailConfig, AllocationConfig
+    from box_label_generator import BoxLabelGenerator
+    from config import FileConfig, DeliveryNoteConfig, AssortmentConfig, StoreDetailConfig, AllocationConfig, BoxLabelConfig
 except ImportError as e:
     print(f"Error importing core modules: {e}")
     print(f"Current sys.path: {sys.path}")
@@ -218,7 +219,12 @@ async def preview_history_file(history_id: int, db: Session = Depends(get_db)):
         import pandas as pd
         import numpy as np
         # Read first 20 rows
-        df = pd.read_excel(record.file_path, nrows=20)
+        # header=None means we read the first row as data, preventing pandas from making up "Unnamed: X" headers
+        # if the file has complex headers.
+        # But if the file HAS headers, they will be row 0.
+        # Let's read with header=None first, then try to detect if row 0 looks like a header.
+        df = pd.read_excel(record.file_path, nrows=20, header=None)
+        
         # Replace NaN, inf, -inf with None for valid JSON
         df = df.replace([np.inf, -np.inf], np.nan)
         df = df.where(pd.notnull(df), None)
@@ -235,10 +241,19 @@ async def preview_history_file(history_id: int, db: Session = Depends(get_db)):
                 else:
                     cleaned_row.append(cell)
             data.append(cleaned_row)
+            
+        # If we read with header=None, columns are 0, 1, 2...
+        # We can just return the data, and let frontend assume first row might be header
+        # OR we can manually set columns to "Column 1", "Column 2" etc.
+        # But the user issue is "Unnamed: 0". 
+        # By using header=None, we avoid pandas generating "Unnamed".
+        # Instead, the actual header row (if any) becomes the first row of 'data'.
+        # We can pass empty columns list or generic ones.
         
         return {
-            "columns": df.columns.tolist(),
-            "data": data
+            "columns": [f"Col {i+1}" for i in range(len(df.columns))], 
+            "data": data,
+            "has_header": False # Hint to frontend that we treated it as no-header
         }
     except Exception as e:
         logger.error(f"Preview failed: {e}")
@@ -549,6 +564,131 @@ async def _run_conversion(
         if template_path and template_path.exists() and UPLOAD_DIR in template_path.parents:
              try: os.remove(template_path)
              except: pass
+
+@app.post("/api/generate-labels")
+async def generate_box_labels(
+    history_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    根据历史记录生成箱贴PDF
+    """
+    # 1. 查找历史记录
+    record = db.query(models.ConversionHistory).filter(
+        models.ConversionHistory.id == history_id
+    ).first()
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    
+    # 2. 检查源文件
+    if not record.source_file_path or not os.path.exists(record.source_file_path):
+        raise HTTPException(status_code=400, detail="Source file not found")
+        
+    try:
+        # 3. 重新读取和转换数据
+        # 假设源文件是配分表格式
+        reader = AllocationTableReader(record.source_file_path)
+        allocation_data = reader.read()
+        
+        transformer = DataTransformer(allocation_data)
+        transform_result = transformer.transform()
+        
+        # 4. 生成PDF
+        timestamp = int(datetime.now().timestamp())
+        # Clean up original filename for PDF name
+        safe_filename = "".join([c for c in record.original_filename if c.isalnum() or c in (' ', '.', '-', '_')]).strip()
+        pdf_filename = f"BoxLabels_{timestamp}_{safe_filename}.pdf"
+        
+        # 移除可能的 .xlsx后缀
+        if pdf_filename.endswith(".xlsx.pdf"):
+            pdf_filename = pdf_filename.replace(".xlsx.pdf", ".pdf")
+        elif pdf_filename.endswith(".xls.pdf"):
+            pdf_filename = pdf_filename.replace(".xls.pdf", ".pdf")
+            
+        pdf_path = OUTPUT_DIR / pdf_filename
+        
+        generator = BoxLabelGenerator(transform_result, str(pdf_path))
+        generator.generate()
+        
+        return {
+            "status": "success",
+            "download_url": f"/api/download/{pdf_filename}",
+            "filename": pdf_filename
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to generate labels: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Label generation failed: {str(e)}")
+
+
+@app.post("/api/generate-labels-from-file")
+async def generate_labels_from_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    上传工厂返回的箱设定文件，生成箱贴PDF
+    """
+    try:
+        # 1. Save uploaded file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"factory_box_setting_{timestamp}.xlsx"
+        file_path = UPLOAD_DIR / filename
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        logger.info(f"Received factory file: {file.filename}, saved to {file_path}")
+        
+        # 2. Parse file
+        reader = BoxSettingReader(str(file_path))
+        boxes = reader.read()
+        
+        if not boxes:
+            raise HTTPException(status_code=400, detail="未在文件中找到有效的箱设定数据 (请检查是否包含 PT 页)")
+            
+        # 3. Generate PDF
+        pdf_filename = f"BoxLabels_{timestamp}.pdf"
+        pdf_path = OUTPUT_DIR / pdf_filename
+        
+        generator = BoxLabelGenerator(boxes, str(pdf_path))
+        output_path, stats = generator.generate()
+        
+        # 4. Create History Record
+        history_record = models.ConversionHistory(
+            original_filename=file.filename,
+            mode="box_label",
+            status="success",
+            output_filename=pdf_filename,
+            file_path=str(pdf_path),
+            source_file_path=str(file_path),
+            stats=stats
+        )
+        db.add(history_record)
+        db.commit()
+        db.refresh(history_record)
+        
+        # 5. Return response
+        return {
+            "status": "success",
+            "message": f"成功生成 {len(boxes)} 张箱贴",
+            "download_url": f"/api/download/{pdf_filename}",
+            "filename": pdf_filename,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating labels: {e}")
+        import traceback
+        traceback.print_exc()
+        # Save failed history if possible? 
+        # Since we might not have 'file_path' if error happens early, skip for simplicity or handle better.
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        pass
 
 # --- End History Management APIs ---
 
