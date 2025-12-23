@@ -700,6 +700,8 @@ async def convert_file(
     template_name: str = Form(None), # Optional: name of template in library
     mode: str = Form("allocation"), # allocation, delivery_note, assortment
     week_num: str = Form(None), # Optional: week number for assortment
+    start_no: str = Form(None), # Optional: start number for delivery note
+    is_hanger: str = Form(None), # Optional: "true" for hanger allocation
     db: Session = Depends(get_db)
 ):
     """
@@ -972,7 +974,7 @@ async def convert_file(
                         except ImportError:
                             pass
             
-            generator = DeliveryNoteGenerator(str(input_path), str(real_template_path), str(output_path))
+            generator = DeliveryNoteGenerator(str(input_path), str(real_template_path), str(output_path), start_no=int(start_no) if start_no else None)
             generator.process()
             # items_processed is hard to get without return, but let's assume success
             items_processed = len(generator.data_rows)
@@ -1051,7 +1053,7 @@ async def convert_file(
             
             # Step C: Write
             writer = TemplateWriter(str(real_template_path), str(output_path))
-            writer.write(transform_result)
+            writer.write(transform_result, is_hanger=(is_hanger == 'true'))
             
             # --- NEW: Step D: Write ④ Store Detail ---
             try:

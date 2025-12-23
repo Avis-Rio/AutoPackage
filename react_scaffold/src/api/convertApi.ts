@@ -8,6 +8,8 @@ export type ConvertRequest = {
   templateName?: string | null;
   detailFile?: File | null;
   weekNum?: string | null;
+  startNo?: string | null;
+  isHanger?: boolean;
 };
 
 export const convertApi = {
@@ -19,6 +21,8 @@ export const convertApi = {
     if (req.templateName) formData.append("template_name", req.templateName);
     if (req.detailFile) formData.append("detail_file", req.detailFile);
     if (req.weekNum) formData.append("week_num", req.weekNum);
+    if (req.startNo) formData.append("start_no", req.startNo);
+    if (req.isHanger !== undefined) formData.append("is_hanger", String(req.isHanger));
     return await httpClient.postForm("/api/convert", formData);
   },
 

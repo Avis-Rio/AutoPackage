@@ -13,7 +13,7 @@ from config import TemplateConfig, DeliveryNoteConfig
 class DeliveryNoteGenerator:
     """受渡伝票生成器"""
     
-    def __init__(self, input_path: str, template_path: str, output_path: str):
+    def __init__(self, input_path: str, template_path: str, output_path: str, start_no: int = None):
         """
         初始化生成器
         
@@ -21,10 +21,12 @@ class DeliveryNoteGenerator:
             input_path: 输入文件路径（填写了箱号的配分表）
             template_path: 模板文件路径（受渡伝票模板）
             output_path: 输出文件路径
+            start_no: 起始编号 (可选)
         """
         self.input_path = input_path
         self.template_path = template_path
         self.output_path = output_path
+        self.start_no = start_no
         self.data_rows = []
 
     def process(self):
@@ -103,6 +105,8 @@ class DeliveryNoteGenerator:
         # Col I (8) ~: SKU Quantities
         
         row_idx = 5
+        current_no = self.start_no if self.start_no is not None else None
+
         while row_idx < ws.max_row:
             row_num = row_idx + 1
             store_code = ws.cell(row=row_num, column=4).value # Col D
@@ -123,12 +127,28 @@ class DeliveryNoteGenerator:
                 row_idx += 1
                 continue
 
-            # 必须有 CTN_NO 才处理
-            if ctn_no_raw:
+            # 必须有 CTN_NO 才处理 (作为行有效的标志)，或者如果指定了start_no，我们只关心是否有有效数据行
+            # 通常配分表每一行都有 CTN_NO，如果没有，可能是无效行
+            # 兼容旧逻辑：如果有 ctn_no_raw 或者我们有 start_no 且有 store_code
+            if ctn_no_raw or (current_no is not None and store_code):
                 try:
-                    # 格式化 CTN_NO: 81 + 4位数字 (补0)
-                    ctn_no_int = int(ctn_no_raw)
-                    slip_no = f"81{ctn_no_int:04d}"
+                    # 格式化 CTN_NO
+                    if current_no is not None:
+                        # 使用自增编号
+                        slip_no = f"81{current_no:04d}"
+                        # 递增并重置
+                        current_no += 1
+                        if current_no > 9999:
+                            current_no = 1
+                    else:
+                        # 使用 Excel 中的 CTN_NO
+                        if ctn_no_raw:
+                            ctn_no_int = int(ctn_no_raw)
+                            slip_no = f"81{ctn_no_int:04d}"
+                        else:
+                            # 应该不会发生，因为上面的if条件
+                            row_idx += 1
+                            continue
                     
                     # 遍历SKU列，提取数量 > 0 的记录
                     for col_idx, sku_info in sku_map.items():
@@ -196,6 +216,8 @@ class DeliveryNoteGenerator:
                 
         # 3. 遍历数据
         row_idx = 5 # Row 6
+        current_no = self.start_no if self.start_no is not None else None
+
         while row_idx < sheet.nrows:
             try:
                 store_code = sheet.cell_value(row_idx, 3) # Col D
@@ -209,10 +231,20 @@ class DeliveryNoteGenerator:
                     row_idx += 1
                     continue
                     
-                if ctn_no_raw:
+                if ctn_no_raw or (current_no is not None and store_code):
                     try:
-                        ctn_no_int = int(float(ctn_no_raw))
-                        slip_no = f"81{ctn_no_int:04d}"
+                        if current_no is not None:
+                            slip_no = f"81{current_no:04d}"
+                            current_no += 1
+                            if current_no > 9999:
+                                current_no = 1
+                        else:
+                            if ctn_no_raw:
+                                ctn_no_int = int(float(ctn_no_raw))
+                                slip_no = f"81{ctn_no_int:04d}"
+                            else:
+                                row_idx += 1
+                                continue
                         
                         for col_idx, sku_info in sku_map.items():
                             qty = sheet.cell_value(row_idx, col_idx)

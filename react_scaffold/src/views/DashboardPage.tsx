@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
+import { useToast } from "../ui/Toast";
 import type { ConvertMode, ConvertResponse, TemplateInfo } from "../types";
 import { convertApi } from "../api/convertApi";
 import { templatesApi } from "../api/templatesApi";
@@ -86,12 +87,15 @@ export function DashboardPage() {
   const [detailFile, setDetailFile] = useState<File | null>(null);
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [weekNum, setWeekNum] = useState<string>("");
+  const [startNo, setStartNo] = useState<string>("");
+  const [isHanger, setIsHanger] = useState<boolean>(false);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [selectedLibTemplate, setSelectedLibTemplate] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const detailInputRef = useRef<HTMLInputElement | null>(null);
   const templateInputRef = useRef<HTMLInputElement | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     templatesApi
@@ -100,17 +104,28 @@ export function DashboardPage() {
       .catch(() => setTemplates([]));
   }, []);
 
-  useEffect(() => {
+  const resetAllState = () => {
     setFileList([]);
     setDetailFile(null);
     setTemplateFile(null);
     setSelectedLibTemplate("");
     setLogs([]);
     setWeekNum("");
+    setStartNo("");
+    setIsHanger(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (detailInputRef.current) detailInputRef.current.value = "";
     if (templateInputRef.current) templateInputRef.current.value = "";
+  };
+
+  useEffect(() => {
+    resetAllState();
   }, [mode]);
+
+  function onStartNewSession() {
+    resetAllState();
+    addLog("已重置所有状态，准备新一轮任务");
+  }
 
   const okCount = useMemo(() => fileList.filter((f) => f.status === "success").length, [fileList]);
   const processingCount = useMemo(() => fileList.filter((f) => f.status === "processing").length, [fileList]);
@@ -172,7 +187,9 @@ export function DashboardPage() {
           templateFile,
           templateName: selectedLibTemplate || null,
           detailFile,
-          weekNum: mode === "assortment" ? weekNum : null
+          weekNum: mode === "assortment" ? weekNum : null,
+          startNo: mode === "delivery_note" ? startNo : null,
+          isHanger: mode === "allocation" ? isHanger : undefined
         });
       }
 
@@ -192,10 +209,10 @@ export function DashboardPage() {
 
       // Auto download for box labels if URL provided
       // Explicitly disable auto-download for box_label mode
-      if (res.download_url && mode !== "box_label") {
-        addLog(`[${item.file.name}] 准备下载...`);
-        window.open(res.download_url, "_blank");
-      }
+      // if (res.download_url && mode !== "box_label") {
+      //   addLog(`[${item.file.name}] 准备下载...`);
+      //   window.open(res.download_url, "_blank");
+      // }
 
       setFileList((prev) => {
         const next = [...prev];
@@ -217,6 +234,11 @@ export function DashboardPage() {
     if (!fileList.length) return;
     if (mode === "allocation" && !detailFile) {
       addLog("allocation 模式需要先选择明细表");
+      return;
+    }
+    if (mode === "delivery_note" && !startNo) {
+      toast({ type: "error", title: "错误", message: "请输入起始编号 (Start No)" });
+      addLog("错误: 请输入起始编号 (Start No)");
       return;
     }
     for (let i = 0; i < fileList.length; i += 1) {
@@ -324,6 +346,9 @@ export function DashboardPage() {
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setFileList([])} disabled={processingCount > 0}>
                     清空列表
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={onStartNewSession} disabled={processingCount > 0}>
+                    开启新一轮
                   </Button>
                   <Button size="sm" onClick={onConvertAll} disabled={processingCount > 0 || fileList.length === 0}>
                     开始批量转换
@@ -439,8 +464,37 @@ export function DashboardPage() {
                         placeholder="例如：42 或 42W"
                       />
                     </div>
+                  ) : mode === "delivery_note" ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">起始编号 (Start No) <span className="text-red-600 text-xs">必填</span></div>
+                      <input
+                        type="number"
+                        className="w-full border border-slate-300 rounded-md px-2 py-1 text-xs bg-white h-8"
+                        value={startNo}
+                        onChange={(e) => setStartNo(e.target.value)}
+                        placeholder="例如：1 (自动生成 810001)"
+                      />
+                      <div className="text-xs text-slate-500">
+                        每次转换前请确认起始编号。编号超过 9999 会自动重置。
+                      </div>
+                    </div>
                   ) : (
                     <div />
+                  )}
+
+                  {mode === "allocation" && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        id="isHanger"
+                        className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                        checked={isHanger}
+                        onChange={(e) => setIsHanger(e.target.checked)}
+                      />
+                      <label htmlFor="isHanger" className="text-sm font-medium text-slate-700 select-none cursor-pointer">
+                        是否为 HANGER (挂装商品)
+                      </label>
+                    </div>
                   )}
                 </div>
               )}
@@ -505,7 +559,7 @@ export function DashboardPage() {
         <div className="space-y-6">
           <Card>
             <div className="text-sm font-semibold uppercase tracking-wider">处理日志</div>
-            <div className="mt-3 h-[520px] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-2">
+            <div className="mt-3 h-[450px] overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-2">
               {logs.length === 0 ? <div className="text-slate-400">等待任务开始...</div> : null}
               {logs.map((l, i) => {
                 const c = classifyLog(l);

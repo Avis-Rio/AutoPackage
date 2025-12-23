@@ -26,12 +26,13 @@ class TemplateWriter:
         self.output_path = output_path
         self.workbook = None
         
-    def write(self, transformed_data: Dict) -> str:
+    def write(self, transformed_data: Dict, is_hanger: bool = False) -> str:
         """
         写入数据到输出文件
         
         Args:
             transformed_data: 转换后的数据
+            is_hanger: 是否为挂装商品（影响CTN_NO写入逻辑）
             
         Returns:
             输出文件路径
@@ -54,7 +55,7 @@ class TemplateWriter:
             self._update_product_list(transformed_data)
             
             # 创建所有PT页
-            self._create_pt_sheets(transformed_data, template_pt_sheet)
+            self._create_pt_sheets(transformed_data, template_pt_sheet, is_hanger)
             
             # 删除临时模板页
             if template_pt_sheet and temp_template_name in self.workbook.sheetnames:
@@ -191,16 +192,16 @@ class TemplateWriter:
         except:
             pass
     
-    def _create_pt_sheets(self, data: Dict, template_sheet):
+    def _create_pt_sheets(self, data: Dict, template_sheet, is_hanger: bool):
         """创建所有PT页"""
         pt_groups = data['pt_groups']
         metadata = data.get('metadata', {})
         skus = data['skus']
         
         for pt_group in pt_groups:
-            self._create_single_pt_sheet(pt_group, metadata, skus, template_sheet)
+            self._create_single_pt_sheet(pt_group, metadata, skus, template_sheet, is_hanger)
     
-    def _create_single_pt_sheet(self, pt_group: Dict, metadata: Dict, skus: List[Dict], template_sheet):
+    def _create_single_pt_sheet(self, pt_group: Dict, metadata: Dict, skus: List[Dict], template_sheet, is_hanger: bool):
         """创建单个PT页"""
         try:
             pt_name = pt_group['pt_name']
@@ -226,7 +227,7 @@ class TemplateWriter:
             self._write_pt_header(new_sheet, pt_group, metadata, skus)
             
             # 写入数据
-            self._write_pt_data(new_sheet, pt_group, skus)
+            self._write_pt_data(new_sheet, pt_group, skus, is_hanger)
             
         except Exception as e:
             print(f"警告: 创建PT页 {pt_group.get('pt_name', '?')} 失败: {e}")
@@ -375,7 +376,7 @@ class TemplateWriter:
             cell.border = header_sku_style['border']
 
     
-    def _write_pt_data(self, sheet, pt_group: Dict, skus: List[Dict]):
+    def _write_pt_data(self, sheet, pt_group: Dict, skus: List[Dict], is_hanger: bool):
         """写入PT页数据"""
         stores = pt_group['stores']
         template_row = 6  # 使用第6行作为样式模板
@@ -437,19 +438,24 @@ class TemplateWriter:
             cell.value = store['store_name']
             self._copy_cell_style(sheet, template_row, 5, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
             
-            # CTN_NO（黄色背景）- 用户要求在G列填入自动生成的序号(0001顺序)
-            cell = sheet.cell(row=row_num, column=6)
-            # cell.value = store['ctn_no'] # 暂时注释掉
-            cell.value = "" # F列 (CTN_NO标题) 留空
-            self._copy_cell_style(sheet, template_row, 6, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
-            
             # パターン (G列) -> 现在用来填入 全局顺序号
-            cell = sheet.cell(row=row_num, column=7)
+            cell_g = sheet.cell(row=row_num, column=7)
             global_seq = store.get('global_seq_no', 0)
-            cell.value = f"{global_seq:04d}" if global_seq else ""
-            self._copy_cell_style(sheet, template_row, 7, cell, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
+            cell_g.value = f"{global_seq:04d}" if global_seq else ""
+            self._copy_cell_style(sheet, template_row, 7, cell_g, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
             # 确保G列也是居中对齐
-            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell_g.alignment = Alignment(horizontal='center', vertical='center')
+
+            # CTN_NO（黄色背景）
+            # 用户要求：当用户勾选【是否为HANGER】时，G列填入箱号的同时，在F列可以直接写入相同的箱号
+            cell_f = sheet.cell(row=row_num, column=6)
+            if is_hanger:
+                cell_f.value = cell_g.value
+            else:
+                # cell.value = store['ctn_no'] # 暂时注释掉
+                cell_f.value = "" # F列 (CTN_NO标题) 留空
+            
+            self._copy_cell_style(sheet, template_row, 6, cell_f, override_font_name='ＭＳ Ｐゴシック', override_font_size=9)
             
             # 合計
             store_total = store['total_qty']
