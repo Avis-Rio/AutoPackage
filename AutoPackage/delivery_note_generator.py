@@ -13,7 +13,7 @@ from config import TemplateConfig, DeliveryNoteConfig
 class DeliveryNoteGenerator:
     """受渡伝票生成器"""
     
-    def __init__(self, input_path: str, template_path: str, output_path: str, start_no: int = None):
+    def __init__(self, input_path: str, template_path: str, output_path: str, start_no: int = None, prefix: str = "81"):
         """
         初始化生成器
         
@@ -22,11 +22,13 @@ class DeliveryNoteGenerator:
             template_path: 模板文件路径（受渡伝票模板）
             output_path: 输出文件路径
             start_no: 起始编号 (可选)
+            prefix: 受渡伝票NO前缀 (默认 "81")
         """
         self.input_path = input_path
         self.template_path = template_path
         self.output_path = output_path
         self.start_no = start_no
+        self.prefix = prefix
         self.data_rows = []
 
     def process(self):
@@ -135,7 +137,7 @@ class DeliveryNoteGenerator:
                     # 格式化 CTN_NO
                     if current_no is not None:
                         # 使用自增编号
-                        slip_no = f"81{current_no:04d}"
+                        slip_no = f"{self.prefix}{current_no:04d}"
                         # 递增并重置
                         current_no += 1
                         if current_no > 9999:
@@ -144,7 +146,7 @@ class DeliveryNoteGenerator:
                         # 使用 Excel 中的 CTN_NO
                         if ctn_no_raw:
                             ctn_no_int = int(ctn_no_raw)
-                            slip_no = f"81{ctn_no_int:04d}"
+                            slip_no = f"{self.prefix}{ctn_no_int:04d}"
                         else:
                             # 应该不会发生，因为上面的if条件
                             row_idx += 1
@@ -234,14 +236,14 @@ class DeliveryNoteGenerator:
                 if ctn_no_raw or (current_no is not None and store_code):
                     try:
                         if current_no is not None:
-                            slip_no = f"81{current_no:04d}"
+                            slip_no = f"{self.prefix}{current_no:04d}"
                             current_no += 1
                             if current_no > 9999:
                                 current_no = 1
                         else:
                             if ctn_no_raw:
                                 ctn_no_int = int(float(ctn_no_raw))
-                                slip_no = f"81{ctn_no_int:04d}"
+                                slip_no = f"{self.prefix}{ctn_no_int:04d}"
                             else:
                                 row_idx += 1
                                 continue

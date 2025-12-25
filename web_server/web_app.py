@@ -95,6 +95,56 @@ def cleanup_file(path: Path):
 async def read_root():
     return FileResponse(str(current_dir / "static" / "index.html"))
 
+# --- Settings APIs ---
+class SettingUpdate(BaseModel):
+    value: str
+    description: str = None
+
+@app.get("/api/settings")
+async def get_settings(db: Session = Depends(get_db)):
+    """Get all system settings"""
+    settings = db.query(models.SystemSetting).all()
+    # Ensure default settings exist
+    defaults = {
+        "delivery_note_prefix": {"value": "42", "description": "受渡伝票NO前缀 (默认42)"}
+    }
+    
+    result = {}
+    existing_keys = {s.key for s in settings}
+    
+    # Add existing
+    for s in settings:
+        result[s.key] = {"value": s.value, "description": s.description}
+        
+    # Add defaults if missing
+    for key, default in defaults.items():
+        if key not in existing_keys:
+            new_setting = models.SystemSetting(key=key, value=default["value"], description=default["description"])
+            db.add(new_setting)
+            result[key] = default
+            
+    if len(existing_keys) < len(defaults):
+        db.commit()
+        
+    return result
+
+@app.post("/api/settings/{key}")
+async def update_setting(key: str, setting: SettingUpdate, db: Session = Depends(get_db)):
+    """Update a system setting"""
+    db_setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == key).first()
+    if not db_setting:
+        db_setting = models.SystemSetting(key=key, value=setting.value, description=setting.description)
+        db.add(db_setting)
+    else:
+        db_setting.value = setting.value
+        if setting.description:
+            db_setting.description = setting.description
+            
+    db.commit()
+    return {"status": "success", "setting": {"key": key, "value": db_setting.value}}
+
+# --- End Settings APIs ---
+
 # --- Template Management APIs ---
 
 @app.get("/api/templates")
@@ -163,7 +213,7 @@ async def delete_template(filename: str):
 
 @app.get("/api/history")
 async def get_history(
-    limit: int = 20, 
+    limit: int = 10, 
     offset: int = 0, 
     db: Session = Depends(get_db)
 ):
@@ -214,6 +264,13 @@ async def preview_history_file(history_id: int, db: Session = Depends(get_db)):
     
     if record.file_path.lower().endswith('.zip'):
          raise HTTPException(status_code=400, detail="Cannot preview ZIP files")
+    
+    if record.file_path.lower().endswith('.pdf'):
+         return {
+            "columns": ["Preview"], 
+            "data": [["PDF文件无法在线预览，请下载查看 (PDF file cannot be previewed online, please download)"]],
+            "has_header": False
+         }
 
     try:
         import pandas as pd
@@ -454,8 +511,12 @@ async def _run_conversion(
         
         logger.info(f"Starting RERUN process for {input_filename}, Mode: {mode}")
         
+        # Fetch prefix from settings (Common for all modes)
+        prefix_setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == "delivery_note_prefix").first()
+        prefix = prefix_setting.value if prefix_setting else "42"
+
         if mode == "assortment":
-            generator = AssortmentGenerator(str(temp_input_path), str(real_template_path), str(output_path), week_num=week_num)
+            generator = AssortmentGenerator(str(temp_input_path), str(real_template_path), str(output_path), week_num=week_num, prefix=prefix)
             generator.process()
             items_processed = len(generator.data_rows)
             response_stats["items_processed"] = items_processed
@@ -510,7 +571,7 @@ async def _run_conversion(
                         real_template_path = temp_xlsx
                      except: pass
 
-            generator = DeliveryNoteGenerator(str(temp_input_path), str(real_template_path), str(output_path))
+            generator = DeliveryNoteGenerator(str(temp_input_path), str(real_template_path), str(output_path), prefix=prefix)
             generator.process()
             items_processed = len(generator.data_rows)
             response_stats["items_processed"] = items_processed
@@ -873,8 +934,12 @@ async def convert_file(
         
         items_processed = 0
         
+        # Fetch prefix from settings (Common for all modes)
+        prefix_setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == "delivery_note_prefix").first()
+        prefix = prefix_setting.value if prefix_setting else "42"
+
         if mode == "assortment":
-            generator = AssortmentGenerator(str(input_path), str(real_template_path), str(output_path), week_num=week_num)
+            generator = AssortmentGenerator(str(input_path), str(real_template_path), str(output_path), week_num=week_num, prefix=prefix)
             generator.process()
             items_processed = len(generator.data_rows)
             response_stats["items_processed"] = items_processed
@@ -974,7 +1039,8 @@ async def convert_file(
                         except ImportError:
                             pass
             
-            generator = DeliveryNoteGenerator(str(input_path), str(real_template_path), str(output_path), start_no=int(start_no) if start_no else None)
+            # Prefix already fetched above
+            generator = DeliveryNoteGenerator(str(input_path), str(real_template_path), str(output_path), start_no=int(start_no) if start_no else None, prefix=prefix)
             generator.process()
             # items_processed is hard to get without return, but let's assume success
             items_processed = len(generator.data_rows)
@@ -1072,7 +1138,7 @@ async def convert_file(
                         sd_filename = os.path.splitext(sd_filename)[0] + '.xlsx'
                     sd_output_path = OUTPUT_DIR / sd_filename
                     
-                    sd_writer = StoreDetailWriter(str(sd_template_path), str(sd_output_path))
+                    sd_writer = StoreDetailWriter(str(sd_template_path), str(sd_output_path), prefix=prefix)
                     sd_writer.write(transform_result)
                     logger.info(f"Generated Store Detail: {sd_output_path}")
                 else:

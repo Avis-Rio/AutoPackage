@@ -7,9 +7,10 @@ from config import StoreDetailConfig
 class StoreDetailWriter:
     """各店铺明细写入器"""
     
-    def __init__(self, template_path, output_path):
+    def __init__(self, template_path, output_path, prefix="81"):
         self.template_path = template_path
         self.output_path = output_path
+        self.prefix = prefix
         
     def write(self, data):
         """
@@ -73,9 +74,9 @@ class StoreDetailWriter:
                             # 降级：尝试使用原始 no (不推荐)
                             seq_no = int(store.get('no', 0))
                         
-                        slip_no = f"81{seq_no:04d}"
+                        slip_no = f"{self.prefix}{seq_no:04d}"
                     except:
-                        slip_no = f"81{str(store.get('no', ''))}"
+                        slip_no = f"{self.prefix}{str(store.get('no', ''))}"
                     
                     for sku in all_skus:
                         p_code = str(sku.get('product_code', ''))

@@ -17,7 +17,7 @@ from copy import copy
 class AssortmentGenerator:
     """アソート明細生成器"""
     
-    def __init__(self, input_path: str, template_path: str, output_path: str, week_num: str = None):
+    def __init__(self, input_path: str, template_path: str, output_path: str, week_num: str = None, prefix: str = "81"):
         """
         初始化生成器
         
@@ -26,6 +26,7 @@ class AssortmentGenerator:
             template_path: 模板文件路径（アソート明細模板）
             output_path: 输出文件路径
             week_num: 周数 (可选)
+            prefix: 受渡伝票NO前缀 (默认 "81")
         """
         self.input_path = input_path
         self.template_path = template_path
@@ -33,6 +34,7 @@ class AssortmentGenerator:
         self.data_rows = []
         self.logs = [] # 用于存储日志信息
         self.week_num = week_num
+        self.prefix = prefix
 
     def process(self):
         """执行转换流程"""
@@ -205,8 +207,8 @@ class AssortmentGenerator:
                     except:
                         ctn_no_formatted = ctn_no_str
                         
-                    # 规则: 2位数W + "81" + CTN_NO
-                    slip_no = f"{current_week}W81{ctn_no_formatted}"
+                    # 规则: 2位数W + 前缀 + CTN_NO
+                    slip_no = f"{current_week}W{self.prefix}{ctn_no_formatted}"
                     
                     row_sku_sum = 0
                     
@@ -362,7 +364,7 @@ class AssortmentGenerator:
                         else:
                             ctn_no_formatted = str(ctn_no_raw).strip()
                             
-                        slip_no = f"{current_week}W81{ctn_no_formatted}"
+                        slip_no = f"{current_week}W{self.prefix}{ctn_no_formatted}"
                         
                         row_sku_sum = 0
                         

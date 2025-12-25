@@ -16,3 +16,10 @@ class ConversionHistory(Base):
     note = Column(String, nullable=True) # User notes
     stats = Column(JSON, nullable=True)  # JSON field for statistics
     error_message = Column(String, nullable=True)
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String)
+    description = Column(String, nullable=True)

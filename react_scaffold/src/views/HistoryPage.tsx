@@ -34,7 +34,7 @@ export const HistoryPage: React.FC = () => {
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
-    const pageSize = 20;
+    const pageSize = 10;
 
     // Batch selection state
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
