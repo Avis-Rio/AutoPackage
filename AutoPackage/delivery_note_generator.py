@@ -107,7 +107,8 @@ class DeliveryNoteGenerator:
         # Col I (8) ~: SKU Quantities
         
         row_idx = 5
-        current_no = self.start_no if self.start_no is not None else None
+        # Removed auto-increment current_no
+        # current_no = self.start_no if self.start_no is not None else None
 
         while row_idx < ws.max_row:
             row_num = row_idx + 1
@@ -129,28 +130,19 @@ class DeliveryNoteGenerator:
                 row_idx += 1
                 continue
 
-            # 必须有 CTN_NO 才处理 (作为行有效的标志)，或者如果指定了start_no，我们只关心是否有有效数据行
-            # 通常配分表每一行都有 CTN_NO，如果没有，可能是无效行
-            # 兼容旧逻辑：如果有 ctn_no_raw 或者我们有 start_no 且有 store_code
-            if ctn_no_raw or (current_no is not None and store_code):
+            # 必须有 CTN_NO 才处理 (作为行有效的标志)
+            if ctn_no_raw:
                 try:
-                    # 格式化 CTN_NO
-                    if current_no is not None:
-                        # 使用自增编号
-                        slip_no = f"{self.prefix}{current_no:04d}"
-                        # 递增并重置
-                        current_no += 1
-                        if current_no > 9999:
-                            current_no = 1
+                    ctn_no_int = int(ctn_no_raw)
+                    
+                    # Logic update: Use start_no as offset if provided
+                    if self.start_no is not None:
+                         # 逻辑：seq = start_no + (ctn_no - 1)
+                         # 假设 ctn_no 从 1 开始
+                         seq_no = self.start_no + (ctn_no_int - 1)
+                         slip_no = f"{self.prefix}{seq_no:04d}"
                     else:
-                        # 使用 Excel 中的 CTN_NO
-                        if ctn_no_raw:
-                            ctn_no_int = int(ctn_no_raw)
-                            slip_no = f"{self.prefix}{ctn_no_int:04d}"
-                        else:
-                            # 应该不会发生，因为上面的if条件
-                            row_idx += 1
-                            continue
+                         slip_no = f"{self.prefix}{ctn_no_int:04d}"
                     
                     # 遍历SKU列，提取数量 > 0 的记录
                     for col_idx, sku_info in sku_map.items():
@@ -218,7 +210,8 @@ class DeliveryNoteGenerator:
                 
         # 3. 遍历数据
         row_idx = 5 # Row 6
-        current_no = self.start_no if self.start_no is not None else None
+        # Removed auto-increment current_no
+        # current_no = self.start_no if self.start_no is not None else None
 
         while row_idx < sheet.nrows:
             try:
@@ -233,35 +226,35 @@ class DeliveryNoteGenerator:
                     row_idx += 1
                     continue
                     
-                if ctn_no_raw or (current_no is not None and store_code):
+                if ctn_no_raw:
                     try:
-                        if current_no is not None:
-                            slip_no = f"{self.prefix}{current_no:04d}"
-                            current_no += 1
-                            if current_no > 9999:
-                                current_no = 1
-                        else:
-                            if ctn_no_raw:
-                                ctn_no_int = int(float(ctn_no_raw))
-                                slip_no = f"{self.prefix}{ctn_no_int:04d}"
+                        ctn_no_val = 0
+                        if isinstance(ctn_no_raw, (int, float)):
+                            ctn_no_val = int(ctn_no_raw)
+                        elif isinstance(ctn_no_raw, str) and ctn_no_raw.strip().isdigit():
+                            ctn_no_val = int(ctn_no_raw)
+                            
+                        if ctn_no_val > 0:
+                            if self.start_no is not None:
+                                seq_no = self.start_no + (ctn_no_val - 1)
+                                slip_no = f"{self.prefix}{seq_no:04d}"
                             else:
-                                row_idx += 1
-                                continue
-                        
-                        for col_idx, sku_info in sku_map.items():
-                            qty = sheet.cell_value(row_idx, col_idx)
-                            if qty and isinstance(qty, (int, float)) and qty > 0:
-                                if isinstance(store_code, float): store_code = str(int(store_code))
-                                
-                                self.data_rows.append({
-                                    'slip_no': slip_no,
-                                    'brand': brand,
-                                    'store_code': str(store_code),
-                                    'product_code': sku_info['product_code'],
-                                    'size': sku_info['size'],
-                                    'color': sku_info['color'],
-                                    'qty': int(qty)
-                                })
+                                slip_no = f"{self.prefix}{ctn_no_val:04d}"
+                            
+                            for col_idx, sku_info in sku_map.items():
+                                qty = sheet.cell_value(row_idx, col_idx)
+                                if qty and isinstance(qty, (int, float)) and qty > 0:
+                                    if isinstance(store_code, float): store_code = str(int(store_code))
+                                    
+                                    self.data_rows.append({
+                                        'slip_no': slip_no,
+                                        'brand': brand,
+                                        'store_code': str(store_code),
+                                        'product_code': sku_info['product_code'],
+                                        'size': sku_info['size'],
+                                        'color': sku_info['color'],
+                                        'qty': int(qty)
+                                    })
                     except ValueError:
                         pass
             except IndexError:

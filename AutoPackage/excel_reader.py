@@ -203,8 +203,29 @@ class DetailTableReader:
             Dict: {(品番, カラー, サイズ): JANCODE}
         """
         try:
-            # 读取 Excel 文件
-            df = pd.read_excel(file_path)
+            # 智能判断文件类型读取
+            file_path_lower = file_path.lower()
+            
+            if file_path_lower.endswith('.csv') or file_path_lower.endswith('.txt'):
+                # 尝试不同的分隔符和编码
+                try:
+                    # 优先尝试制表符分隔（常见于系统导出）
+                    df = pd.read_csv(file_path, sep='\t', dtype=str)
+                    # 如果只有一列，可能不是制表符，尝试逗号
+                    if len(df.columns) < 2:
+                        df = pd.read_csv(file_path, sep=',', dtype=str)
+                except:
+                    # 如果UTF-8失败，尝试GBK/Shift-JIS
+                    try:
+                        df = pd.read_csv(file_path, sep='\t', encoding='shift-jis', dtype=str)
+                    except:
+                        df = pd.read_csv(file_path, sep='\t', encoding='gbk', dtype=str)
+            else:
+                # 默认为 Excel
+                df = pd.read_excel(file_path, dtype=str)
+            
+            # 清理列名（去除空白）
+            df.columns = df.columns.str.strip()
             
             # 检查必要的列是否存在
             required_cols = [
@@ -225,14 +246,32 @@ class DetailTableReader:
                 product_code = str(row[DetailTableConfig.COL_PRODUCT_CODE]).strip()
                 # 处理颜色：去除小数点（如果是浮点数）
                 color_val = row[DetailTableConfig.COL_COLOR]
-                if isinstance(color_val, float) and color_val.is_integer():
+                # 由于读取时指定了 dtype=str，这里通常是字符串，但为了保险起见保留处理逻辑
+                # 如果是字符串形式的浮点数 "403.0"，split处理
+                if isinstance(color_val, str):
+                    if '.' in color_val:
+                        try:
+                            color = str(int(float(color_val)))
+                        except:
+                            color = color_val.strip()
+                    else:
+                        color = color_val.strip()
+                elif isinstance(color_val, float) and color_val.is_integer():
                     color = str(int(color_val))
                 else:
                     color = str(color_val).strip()
                     
                 # 处理尺码
                 size_val = row[DetailTableConfig.COL_SIZE]
-                if isinstance(size_val, float) and size_val.is_integer():
+                if isinstance(size_val, str):
+                    if '.' in size_val:
+                         try:
+                            size = str(int(float(size_val)))
+                         except:
+                            size = size_val.strip()
+                    else:
+                        size = size_val.strip()
+                elif isinstance(size_val, float) and size_val.is_integer():
                     size = str(int(size_val))
                 else:
                     size = str(size_val).strip()
@@ -240,7 +279,15 @@ class DetailTableReader:
                 # 处理JAN：去除小数点
                 jan_val = row[DetailTableConfig.COL_JAN]
                 if pd.notna(jan_val):
-                    if isinstance(jan_val, float):
+                    if isinstance(jan_val, str):
+                        if '.' in jan_val:
+                            try:
+                                jan = str(int(float(jan_val)))
+                            except:
+                                jan = jan_val.strip()
+                        else:
+                            jan = jan_val.strip()
+                    elif isinstance(jan_val, float):
                         jan = str(int(jan_val))
                     else:
                         jan = str(jan_val).strip()

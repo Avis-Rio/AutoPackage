@@ -66,21 +66,65 @@ class BoxLabelGenerator:
             logger.warning("No boxes data provided to generate labels.")
             return self.output_path, {}
 
-        c = canvas.Canvas(self.output_path, pagesize=A4)
-        total_boxes = len(self.boxes)
-        logger.info(f"Generating labels for {total_boxes} boxes...")
+        # Pre-process boxes to handle pagination for overflowing items
+        processed_boxes = []
         
-        # 统计数据
+        # Max rows per label
+        MAX_ROWS = 14
+        
+        for box in self.boxes:
+            items = box['items']
+            total_items = len(items)
+            
+            if total_items <= MAX_ROWS:
+                box['_original_box_index'] = self.boxes.index(box) + 1
+                box['_total_logical_boxes'] = len(self.boxes)
+                processed_boxes.append(box)
+            else:
+                # Need to split into multiple labels
+                # Calculate number of sub-boxes needed
+                import math
+                num_parts = math.ceil(total_items / MAX_ROWS)
+                
+                original_ctn_no = str(box['ctn_no'])
+                
+                for i in range(num_parts):
+                    start_idx = i * MAX_ROWS
+                    end_idx = min((i + 1) * MAX_ROWS, total_items)
+                    sub_items = items[start_idx:end_idx]
+                    
+                    # Create a sub-box copy
+                    sub_box = box.copy()
+                    sub_box['items'] = sub_items
+                    # Update C/No to format "9-1", "9-2" etc.
+                    sub_box['ctn_no'] = f"{original_ctn_no}-{i+1}"
+                    # Note: total_qty should probably remain the total for the whole box? 
+                    # Or sum of this sub-box? Usually label shows what's inside.
+                    # Let's calculate sum for this sub-box
+                    sub_box['total_qty'] = sum(item['qty'] for item in sub_items)
+                    
+                    # Store original box information for footer numbering
+                    # We need to know which logical box this belongs to
+                    sub_box['_original_box_index'] = self.boxes.index(box) + 1 # 1-based index
+                    sub_box['_total_logical_boxes'] = len(self.boxes)
+                    
+                    processed_boxes.append(sub_box)
+
+        c = canvas.Canvas(self.output_path, pagesize=A4)
+        total_boxes = len(processed_boxes)
+        logger.info(f"Generating labels for {total_boxes} labels (from {len(self.boxes)} original boxes)...")
+        
+        # 统计数据 (Based on original boxes for accuracy)
         stats = {
-            "box_count": total_boxes,
+            "box_count": len(self.boxes), # Logical boxes
+            "label_count": total_boxes,   # Physical labels
             "store_count": len(set(b['store_code'] for b in self.boxes)),
             "total_qty": sum(b['total_qty'] for b in self.boxes),
             "pt_count": len(set(b['pattern'] for b in self.boxes)),
             "sku_count": 0
         }
         
-        # SKU count needs careful calculation (unique maker_codes?)
-        # Or just sum of line items? Let's count unique maker codes across all boxes
+        # SKU count
         all_maker_codes = set()
         for b in self.boxes:
             for item in b['items']:
@@ -89,7 +133,7 @@ class BoxLabelGenerator:
         
         # 分页生成 (每页4张)
         for page_idx in range(0, total_boxes, 4):
-            page_boxes = self.boxes[page_idx:page_idx+4]
+            page_boxes = processed_boxes[page_idx:page_idx+4]
             self._draw_page(c, page_boxes, page_idx, total_boxes)
             c.showPage()
         
@@ -183,10 +227,10 @@ class BoxLabelGenerator:
         # 填充数据
         # 动态计算可用高度: 120 - 30(Head) - 20(Foot) = 70mm
         # 行高 4.5mm => ~14-15行
-        max_rows = 14
+        # max_rows is now handled by preprocessing
         items = box['items']
         
-        for item in items[:max_rows]:
+        for item in items:
             # 修正メーカー品番: Brand(Dept) - Product - Size - Color
             # item['maker_code'] is currently Product-Color-Size (from BoxSettingReader)
             # We need to parse it and reconstruct.
@@ -212,8 +256,7 @@ class BoxLabelGenerator:
                 str(item['qty'])
             ])
             
-        if len(items) > max_rows:
-            table_data.append(['...', '...', '...', '...'])
+        # No more '...' truncation needed as we split boxes
             
         # 创建表格
         # 列宽分配: 12mm, 38mm, 35mm, 10mm (Total 95mm < 100mm)
@@ -255,7 +298,14 @@ class BoxLabelGenerator:
         c.drawRightString(width - padding, 13*mm, f"入数  {box['total_qty']} PCS")
         
         # 底部中间：页码/总箱数
-        c.drawCentredString(width / 2, 5*mm, f"{current_no} / {total}")
+        # 修正：显示原始箱号索引 / 原始总箱数
+        # 之前是 current_no (processed index) / total (processed count)
+        # 现在需要显示 Logical Box Index / Total Logical Boxes
+        
+        box_idx = box.get('_original_box_index', current_no)
+        total_boxes = box.get('_total_logical_boxes', total)
+        
+        c.drawCentredString(width / 2, 5*mm, f"{box_idx} / {total_boxes}")
         
         c.restoreState()
 
